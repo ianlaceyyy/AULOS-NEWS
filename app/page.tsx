@@ -10,6 +10,10 @@ type Citation = { source:string; sourceSlug:string; label:string; url:string; ev
 type EventClaim = { id:string; status:string; classification:"fact"|"inference"; confidence:number; statement:string; qualification:string; citations:Citation[] };
 type LiveEvent = Event & { methodology:string; claims:EventClaim[] };
 type EventPayload = { status:"live"|"degraded"; generatedAt:string; events:LiveEvent[] };
+type IntelligencePerspective = { source:string; title:string; summary:string; url:string; publishedAt:string; tier:number };
+type IntelligenceCluster = { id:string; topic:string; title:string; updatedAt:string; sourceCount:number; itemCount:number; confidence:number; corroboration:"cross-source"|"single-source"; summary:string; perspectives:IntelligencePerspective[] };
+type FeedHealth = { slug:string; name:string; domain:string; url:string; status:"live"|"degraded"; latencyMs:number; itemCount:number; error?:string };
+type IntelligencePayload = { status:"live"|"degraded"; generatedAt:string; itemCount:number; clusters:IntelligenceCluster[]; feedHealth:FeedHealth[]; methodology:{clustering:string;corroboration:string;guardrail:string} };
 
 const events: Event[] = [
   { id: "fed", category: "MACRO · MONETARY POLICY", kicker: "THE POLICY PATH", title: "Markets are repricing the next phase of Federal Reserve policy", summary: "A softer labor pulse is colliding with persistent services inflation. The debate has shifted from whether policy is restrictive to how quickly the Fed can normalize without reigniting prices.", change: "Rate-cut expectations moved forward; the long end remained resistant.", confidence: 88, sources: 18, updated: "22 min ago", tone: "amber", tags: ["Federal Reserve", "Treasuries", "Inflation"] },
@@ -34,8 +38,11 @@ export default function Home() {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [liveData, setLiveData] = useState<LivePayload | null>(null);
   const [eventData, setEventData] = useState<EventPayload | null>(null);
+  const [intelligence, setIntelligence] = useState<IntelligencePayload | null>(null);
+  const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
   useEffect(() => { fetch("/api/live-data").then((response) => response.json()).then(setLiveData).catch(() => setLiveData(null)); }, []);
   useEffect(() => { fetch("/api/events").then((response) => response.json()).then((payload:EventPayload) => { setEventData(payload); if(payload.events[0])setSelected(payload.events[0]); }).catch(() => setEventData(null)); }, []);
+  useEffect(() => { fetch("/api/intelligence").then((response)=>response.json()).then((payload:IntelligencePayload)=>{setIntelligence(payload);if(payload.clusters[0])setSelectedCluster(payload.clusters[0].id)}).catch(()=>setIntelligence(null)); }, []);
   const activeEvents = useMemo(() => eventData?.events.length ? [...eventData.events, ...events.slice(1)] : events, [eventData]);
   const marketPulse = liveData?.data.length ? liveData.data.filter((item) => ["DGS2","DGS10","DGS30","T10Y2Y","DCOILBRENTEU"].includes(item.seriesId)).map((item) => [item.label,item.display,item.date]) : ticker;
   const observation = (seriesId:string) => liveData?.data.find((item)=>item.seriesId===seriesId);
@@ -107,6 +114,15 @@ export default function Home() {
             <div className="watch-card"><span className="eyebrow">EVIDENCE PIPELINE</span><div><b>LIVE</b><p>FRED market and macro observations</p></div><div><b>SCHEMA READY</b><p>Events, articles, claims and citations</p></div><div><b>NEXT</b><p>Scheduled official-release ingestion</p></div></div>
             <blockquote>“The purpose is not to eliminate uncertainty. It is to make the uncertainty legible.”<cite>AULOS PRINCIPLE 01</cite></blockquote>
           </aside>
+        </section>
+
+        <section className="wire-room">
+          <div className="wire-head"><div><span className="eyebrow">MULTI-SOURCE ENGINE · LIVE OFFICIAL FEEDS</span><h2>Evidence streams, clustered before narrative.</h2></div><div className="wire-stats"><strong>{intelligence?.itemCount ?? "—"}</strong><span>NORMALIZED ITEMS</span><strong>{intelligence?.feedHealth.filter((feed)=>feed.status==="live").length ?? "—"}/{intelligence?.feedHealth.length ?? 6}</strong><span>FEEDS ONLINE</span></div></div>
+          <div className="wire-layout">
+            <div className="cluster-list"><div className="section-heading"><span>DEVELOPING CLUSTERS</span><small>{intelligence?.methodology.clustering ?? "CONNECTING"}</small></div>{intelligence?.clusters.length ? intelligence.clusters.map((cluster)=><button className={`cluster-card ${selectedCluster===cluster.id?"active":""}`} key={cluster.id} onClick={()=>setSelectedCluster(cluster.id)}><span className={`cluster-state ${cluster.corroboration}`}>{cluster.corroboration==="cross-source"?"CROSS-SOURCE":"UNCONFIRMED"}</span><div><small>{cluster.topic} · {cluster.itemCount} ITEMS</small><h3>{cluster.title}</h3><p>{cluster.summary}</p><div className="cluster-footer"><span>{cluster.sourceCount} {cluster.sourceCount===1?"source":"sources"}</span><span>{cluster.confidence}/100 evidence score</span></div></div></button>) : <div className="wire-loading">Gathering and normalizing official releases…</div>}</div>
+            <div className="evidence-pane">{intelligence?.clusters.find((cluster)=>cluster.id===selectedCluster) ? (()=>{const cluster=intelligence.clusters.find((item)=>item.id===selectedCluster)!;return <><div className="section-heading"><span>EVIDENCE & PERSPECTIVES</span><small>DIRECT LINKS</small></div><div className="evidence-summary"><span className={`cluster-state ${cluster.corroboration}`}>{cluster.corroboration==="cross-source"?"CORROBORATED STREAM":"SINGLE-SOURCE SIGNAL"}</span><h3>{cluster.topic}</h3><p>{cluster.summary}</p></div>{cluster.perspectives.map((item,index)=><a className="wire-source" href={item.url} target="_blank" rel="noreferrer" key={`${item.url}-${index}`}><b>0{index+1}</b><div><span>{item.source} · T{item.tier} PRIMARY</span><h4>{item.title}</h4>{item.summary&&<p>{item.summary}</p>}<small>{item.publishedAt?new Date(item.publishedAt).toLocaleString():"Publication time unavailable"} ↗</small></div></a>)}</>} )() : <div className="wire-loading">Select a cluster to inspect its evidence.</div>}</div>
+          </div>
+          <div className="feed-health"><span>METHODOLOGY</span><p>{intelligence?.methodology.guardrail ?? "AULOS never upgrades a single-source item to confirmed."}</p><div>{intelligence?.feedHealth.map((feed)=><a href={feed.url} target="_blank" rel="noreferrer" key={feed.slug}><i className={feed.status}/>{feed.name}<small>{feed.itemCount} items</small></a>)}</div></div>
         </section>
 
         <section className="dossier" id="dossier">
