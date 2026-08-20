@@ -63,6 +63,23 @@ function parseFeed(xml:string,feed:FeedDefinition):WireItem[]{
 function words(value:string){return new Set(value.toLowerCase().replace(/[^a-z0-9\s-]/g," ").split(/\s+/).filter((word)=>word.length>3&&!new Set(["with","from","that","this","will","have","into","their","about","release","announces","federal","united","states"]).has(word)))}
 function similarity(a:string,b:string){const left=words(a),right=words(b);const overlap=[...left].filter((word)=>right.has(word)).length;return overlap/Math.max(1,new Set([...left,...right]).size)}
 
+function buildNarrative(topic:string,entities:string[],evidence:WireItem[],sourceCount:number,agreement:string,corroboration:string){
+  const newest=evidence[0];
+  const evidenceIndexes=evidence.map((_,index)=>index);
+  const upward=evidence.findIndex((item)=>item.stance==="upward");
+  const downward=evidence.findIndex((item)=>item.stance==="downward");
+  const subject=entities.slice(0,2).join(" and ")||topic.toLowerCase();
+  const sentences=[
+    {id:"latest",label:"Observed",classification:"fact",text:`The latest retrieved item in this cluster was published by ${newest.sourceName}${newest.publishedAt?` on ${new Date(newest.publishedAt).toISOString().slice(0,10)}`:""} and concerns ${subject}.`,citationIndexes:[0]},
+    {id:"breadth",label:"Evidence base",classification:"fact",text:`AULOS currently groups ${evidence.length} retrieved items from ${sourceCount} distinct source ${sourceCount===1?"stream":"streams"} under ${topic.toLowerCase()}.`,citationIndexes:evidenceIndexes},
+  ];
+  if(agreement==="mixed"&&upward>=0&&downward>=0)sentences.push({id:"dissent",label:"Disagreement",classification:"fact",text:"The retrieved language contains both upward and downward directional signals; the evidence does not support a single directional conclusion.",citationIndexes:[upward,downward]});
+  else if(agreement==="aligned")sentences.push({id:"alignment",label:"Agreement",classification:"fact",text:`The directional items in this cluster are aligned as ${evidence.find((item)=>!["neutral","finding"].includes(item.stance))?.stance??"consistent"}.`,citationIndexes:evidenceIndexes.filter((index)=>evidence[index].stance!=="neutral")});
+  else sentences.push({id:"limits",label:"Evidence limit",classification:"analysis",text:"There is not enough directional evidence to characterize agreement or disagreement responsibly.",citationIndexes:evidenceIndexes});
+  sentences.push({id:"judgment",label:"AULOS judgment",classification:"analysis",text:corroboration==="cross-source"?"The cluster is suitable for cross-source monitoring, but the retrieved releases do not by themselves establish causation.":"This remains a single-source signal and should not be treated as independently confirmed.",citationIndexes:evidenceIndexes});
+  return {headline:`${topic}: ${subject}`,dek:`An evidence-constrained brief assembled from ${evidence.length} directly linked items.`,mode:"deterministic-extractive",sentences,whatChanged:evidence.slice(0,3).map((item,index)=>({id:item.id,sequence:index===0?"Latest":"Earlier",publishedAt:item.publishedAt,source:item.sourceName,title:item.title,url:item.url,stance:item.stance}))};
+}
+
 function cluster(items:WireItem[]){
   const groups:Array<{topic:string;items:WireItem[]}>=[];
   for(const item of items.sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt))){
@@ -79,7 +96,8 @@ function cluster(items:WireItem[]){
     const directional=new Set(group.items.map((item)=>item.stance).filter((stance)=>stance!=="neutral"&&stance!=="finding"));
     const agreement=directional.has("upward")&&directional.has("downward")?"mixed":directional.size===1&&group.items.length>1?"aligned":"insufficient";
     const label=entities[0]?`${group.topic}: ${entities[0]}`:newest.title;
-    return {id:`cluster-${index}-${hash(newest.title)}`,topic:group.topic,title:label,updatedAt:newest.publishedAt,sourceCount:uniqueSources.size,itemCount:group.items.length,confidence:crossSource?Math.min(95,68+uniqueSources.size*8+Math.min(10,group.items.length*2)):55,corroboration:crossSource?"cross-source":"single-source",agreement,entities,summary:agreement==="mixed"?"The retrieved evidence contains opposing directional signals. AULOS preserves the disagreement rather than collapsing it into a single conclusion.":crossSource?`${uniqueSources.size} distinct source streams surface related evidence around ${entities.slice(0,2).join(" and ")||group.topic}. The underlying releases remain authoritative.`:"This is a developing single-source signal. AULOS is withholding cross-source confirmation until a separate publisher contributes related evidence.",perspectives:evidence.map((item)=>({source:item.sourceName,sourceClass:item.sourceClass,title:item.title,summary:item.summary,url:item.url,publishedAt:item.publishedAt,tier:item.tier,stance:item.stance,entities:item.entities})),timeline:evidence.map((item)=>({publishedAt:item.publishedAt,source:item.sourceName,title:item.title,url:item.url,stance:item.stance})).sort((a,b)=>a.publishedAt.localeCompare(b.publishedAt))};
+    const corroboration=crossSource?"cross-source":"single-source";
+    return {id:`cluster-${index}-${hash(newest.title)}`,topic:group.topic,title:label,updatedAt:newest.publishedAt,sourceCount:uniqueSources.size,itemCount:group.items.length,confidence:crossSource?Math.min(95,68+uniqueSources.size*8+Math.min(10,group.items.length*2)):55,corroboration,agreement,entities,summary:agreement==="mixed"?"The retrieved evidence contains opposing directional signals. AULOS preserves the disagreement rather than collapsing it into a single conclusion.":crossSource?`${uniqueSources.size} distinct source streams surface related evidence around ${entities.slice(0,2).join(" and ")||group.topic}. The underlying releases remain authoritative.`:"This is a developing single-source signal. AULOS is withholding cross-source confirmation until a separate publisher contributes related evidence.",narrative:buildNarrative(group.topic,entities,evidence,uniqueSources.size,agreement,corroboration),perspectives:evidence.map((item)=>({source:item.sourceName,sourceClass:item.sourceClass,title:item.title,summary:item.summary,url:item.url,publishedAt:item.publishedAt,tier:item.tier,stance:item.stance,entities:item.entities})),timeline:evidence.map((item)=>({publishedAt:item.publishedAt,source:item.sourceName,title:item.title,url:item.url,stance:item.stance})).sort((a,b)=>a.publishedAt.localeCompare(b.publishedAt))};
   }).sort((a,b)=>(b.sourceCount-a.sourceCount)||(b.updatedAt.localeCompare(a.updatedAt))).slice(0,8);
 }
 

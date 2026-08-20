@@ -104,3 +104,30 @@ export const eventUpdates = sqliteTable("event_updates", {
   occurredAt: text("occurred_at").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const narrativeVersions = sqliteTable("narrative_versions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  eventId: integer("event_id").notNull(),
+  version: integer("version").notNull(),
+  headline: text("headline").notNull(),
+  dek: text("dek").notNull(),
+  generationMode: text("generation_mode").notNull(),
+  evidenceHash: text("evidence_hash").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("narrative_event_version_unique").on(table.eventId, table.version)]);
+
+export const narrativeSentences = sqliteTable("narrative_sentences", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  narrativeVersionId: integer("narrative_version_id").notNull(),
+  position: integer("position").notNull(),
+  label: text("label").notNull(),
+  classification: text("classification").notNull(),
+  text: text("text").notNull(),
+}, (table) => [uniqueIndex("narrative_sentence_position_unique").on(table.narrativeVersionId, table.position)]);
+
+export const sentenceCitations = sqliteTable("sentence_citations", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sentenceId: integer("sentence_id").notNull(),
+  articleId: integer("article_id").notNull(),
+  citationOrder: integer("citation_order").notNull(),
+}, (table) => [uniqueIndex("sentence_article_unique").on(table.sentenceId, table.articleId)]);
