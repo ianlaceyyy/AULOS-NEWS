@@ -70,3 +70,37 @@ export const citations = sqliteTable("citations", {
   supports: integer("supports", { mode: "boolean" }).notNull().default(true),
   retrievedAt: text("retrieved_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const entities = sqliteTable("entities", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  canonicalName: text("canonical_name").notNull(),
+  entityType: text("entity_type").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("entities_name_type_unique").on(table.canonicalName, table.entityType)]);
+
+export const eventEntities = sqliteTable("event_entities", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  eventId: integer("event_id").notNull(),
+  entityId: integer("entity_id").notNull(),
+  mentionCount: integer("mention_count").notNull().default(1),
+  relevance: real("relevance").notNull().default(0),
+}, (table) => [uniqueIndex("event_entities_unique").on(table.eventId, table.entityId)]);
+
+export const claimRelations = sqliteTable("claim_relations", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  leftClaimId: integer("left_claim_id").notNull(),
+  rightClaimId: integer("right_claim_id").notNull(),
+  relation: text("relation").notNull(),
+  confidence: integer("confidence").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("claim_relations_unique").on(table.leftClaimId, table.rightClaimId)]);
+
+export const eventUpdates = sqliteTable("event_updates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  eventId: integer("event_id").notNull(),
+  articleId: integer("article_id"),
+  updateType: text("update_type").notNull(),
+  headline: text("headline").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
