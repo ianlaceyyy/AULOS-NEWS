@@ -36,9 +36,25 @@ export async function GET(){
   const started=Date.now(); const now=new Date(); const start=new Date(Date.UTC(now.getUTCFullYear()-1,now.getUTCMonth(),now.getUTCDate())).toISOString().slice(0,10); const end=now.toISOString().slice(0,10);
   const url=`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${Object.keys(seriesMeta).join(",")}&cosd=${start}&coed=${end}`;
   try{
-    const response=await fetch(url,{headers:{"User-Agent":"AULOS-NEWS/0.2 (research prototype)"}}); if(!response.ok)throw new Error(`FRED returned ${response.status}`);
+    const baseUrl=process.env.AULOS_BACKEND_URL?.replace(/\/$/,"");
+    const [response,marketResponse]=await Promise.all([
+      fetch(url,{headers:{"User-Agent":"AULOS-NEWS/0.3 (research intelligence platform)"}}),
+      baseUrl?fetch(`${baseUrl}/v1/markets/snapshots?symbols=SPY,QQQ,IWM,GLD,SLV,USO`,{headers:{"User-Agent":"AULOS-NEWS-Frontend/1.1"}}).catch(()=>null):Promise.resolve(null),
+    ]);
+    if(!response.ok)throw new Error(`FRED returned ${response.status}`);
     const data=latestObservations(await response.text());
-    return Response.json({status:"live",source:"FRED",retrievedAt:new Date().toISOString(),latencyMs:Date.now()-started,persistence:"schema-ready",data,registry});
+    if(marketResponse?.ok){
+      const payload=await marketResponse.json() as {symbols?:Record<string,{latestTrade?:{p?:number;t?:string};dailyBar?:{c?:number;t?:string};prevDailyBar?:{c?:number}}>};
+      const labels:Record<string,string>={SPY:"S&P 500 ETF",QQQ:"Nasdaq 100 ETF",IWM:"Russell 2000 ETF",GLD:"Gold ETF",SLV:"Silver ETF",USO:"Oil ETF"};
+      for(const [symbol,snapshot] of Object.entries(payload.symbols??{})){
+        const value=snapshot.latestTrade?.p??snapshot.dailyBar?.c;
+        if(typeof value!=="number")continue;
+        const prior=snapshot.prevDailyBar?.c;
+        const move=typeof prior==="number"&&prior!==0?((value/prior)-1)*100:null;
+        data.unshift({seriesId:`ALPACA:${symbol}`,label:labels[symbol]??symbol,date:snapshot.latestTrade?.t??snapshot.dailyBar?.t??new Date().toISOString(),value,display:`$${value.toFixed(2)}${move===null?"":` · ${move>=0?"+":""}${move.toFixed(2)}%`}`});
+      }
+    }
+    return Response.json({status:"live",source:marketResponse?.ok?"Alpaca Market Data + FRED":"FRED",retrievedAt:new Date().toISOString(),latencyMs:Date.now()-started,persistence:"hetzner-proxy",data,registry});
   }catch(error){
     return Response.json({status:"degraded",source:"FRED",retrievedAt:new Date().toISOString(),error:error instanceof Error?error.message:"Live source unavailable",data:[],registry}); }
 }
