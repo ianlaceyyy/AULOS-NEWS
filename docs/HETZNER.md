@@ -29,7 +29,7 @@ curl http://127.0.0.1/health
 docker compose logs --tail=100 api
 ```
 
-The API initially listens on HTTP port 80. Keep PostgreSQL private. Once a domain points to the server, replace `:80` in `Caddyfile` with the API hostname; Caddy will then provision and renew HTTPS automatically.
+The API is exposed at `https://62-238-119-174.sslip.io`. The sslip.io hostname resolves directly to the server IP without requiring a purchased domain, and Caddy provisions and renews HTTPS automatically. Keep PostgreSQL private and allow inbound TCP ports 80 and 443 (plus UDP 443 for HTTP/3) in the Hetzner firewall.
 
 After the health endpoint is live, configure the hosted frontend runtime variable `AULOS_BACKEND_URL` with the backend origin. The frontend will use stored PostgreSQL records when the backend is healthy and automatically fall back to direct source retrieval when it is unavailable.
 
