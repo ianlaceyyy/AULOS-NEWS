@@ -108,7 +108,35 @@ async function readFeed(feed:FeedDefinition){
   finally{clearTimeout(timer)}
 }
 
+async function readPersistentBackend(){
+  const baseUrl=process.env.AULOS_BACKEND_URL?.replace(/\/$/,"");
+  if(!baseUrl)return null;
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),8000);
+  try{
+    const [articlesResponse,healthResponse]=await Promise.all([
+      fetch(`${baseUrl}/v1/articles?limit=250`,{signal:controller.signal,headers:{"User-Agent":"AULOS-NEWS-Frontend/1.0"}}),
+      fetch(`${baseUrl}/health`,{signal:controller.signal,headers:{"User-Agent":"AULOS-NEWS-Frontend/1.0"}}),
+    ]);
+    if(!articlesResponse.ok)throw new Error(`Backend returned ${articlesResponse.status}`);
+    const payload=await articlesResponse.json() as {articles?:Array<{id:number;sourceSlug:string;sourceName:string;title:string;summary:string;url:string;publishedAt:string|null;retrievedAt:string}>};
+    const health=healthResponse.ok?await healthResponse.json() as {lastCycle?:{feeds?:Array<{slug:string;status:string;received:number;latencyMs:number;error?:string|null}>}}:null;
+    const feedMap=new Map(feeds.map((feed)=>[feed.slug,feed]));
+    const items:WireItem[]=(payload.articles??[]).flatMap((article)=>{
+      const feed=feedMap.get(article.sourceSlug);if(!feed)return [];
+      const text=`${article.title} ${article.summary}`;
+      return [{id:`stored-${article.id}`,sourceSlug:article.sourceSlug,sourceName:article.sourceName,sourceClass:feed.sourceClass,title:article.title,url:article.url,publishedAt:article.publishedAt??article.retrievedAt,summary:article.summary.slice(0,420),topic:topicFor(text),tier:feed.tier,entities:entitiesFor(text),stance:stanceFor(text)}];
+    });
+    return {items,health:health?.lastCycle?.feeds??[]};
+  }catch{return null}finally{clearTimeout(timer)}
+}
+
 export async function GET(){
+  const persistent=await readPersistentBackend();
+  if(persistent&&persistent.items.length){
+    const clusters=cluster(persistent.items);
+    const healthMap=new Map(persistent.health.map((item)=>[item.slug,item]));
+    return Response.json({status:"live",generatedAt:new Date().toISOString(),persistence:"hetzner-postgresql",methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two distinct source streams",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-source signals are explicitly labeled and never presented as confirmed"},feedHealth:feeds.map((feed)=>{const health=healthMap.get(feed.slug);return {slug:feed.slug,name:feed.name,domain:feed.domain,sourceClass:feed.sourceClass,url:feed.url,status:health?.status??"stored",latencyMs:health?.latencyMs??0,itemCount:health?.received??persistent.items.filter((item)=>item.sourceSlug===feed.slug).length,error:health?.error??undefined}}),itemCount:persistent.items.length,entityCount:new Set(persistent.items.flatMap((item)=>item.entities)).size,clusters});
+  }
   const results=await Promise.all(feeds.map(readFeed));
   const deduped=[...new Map(results.flatMap((result)=>result.items).map((item)=>[item.url,item])).values()];
   const clusters=cluster(deduped);

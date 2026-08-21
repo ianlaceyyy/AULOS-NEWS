@@ -17,7 +17,7 @@ The first vertical slice includes:
 - Confidence and source-mix transparency
 - Responsive desktop and mobile layouts
 
-> Current stories and market values are illustrative prototype content. Live source ingestion is the next development phase.
+The current vertical slice retrieves live official feeds and FRED observations. A persistent Hetzner ingestion service now stores normalized, deduplicated source records in PostgreSQL on a recurring schedule.
 
 ## Product principles
 
@@ -53,6 +53,18 @@ Production validation:
 npm run build
 ```
 
+## Persistent ingestion backend
+
+The separate Hetzner stack includes a FastAPI ingestion service, PostgreSQL, scheduled polling, URL-level deduplication, feed health history, and a Caddy reverse proxy.
+
+```bash
+cp .env.example .env
+# Replace the two placeholder secrets, then:
+./scripts/hetzner-deploy.sh
+```
+
+Deployment and operations are documented in [`docs/HETZNER.md`](docs/HETZNER.md).
+
 ## Roadmap
 
 1. Source registry and ingestion adapters
@@ -63,4 +75,3 @@ npm run build
 6. Living narrative generation
 7. Live market and economic-data overlays
 8. Alerts and personalized briefings
-

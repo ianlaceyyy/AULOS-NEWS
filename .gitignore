@@ -40,3 +40,8 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]

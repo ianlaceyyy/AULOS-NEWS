@@ -1,0 +1,1 @@
+"""AULOS NEWS ingestion service."""
