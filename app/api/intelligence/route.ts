@@ -156,7 +156,8 @@ async function readPersistentBackend(){
     const items:WireItem[]=(payload.articles??[]).flatMap((article)=>{
       const feed=feedMap.get(article.sourceSlug);if(!feed)return [];
       const text=`${article.title} ${article.summary}`;
-      return [{id:`stored-${article.id}`,sourceSlug:article.sourceSlug,publisherId:publisherFor(article.sourceSlug),sourceName:article.sourceName,sourceClass:feed.sourceClass,title:article.title,url:article.url,publishedAt:article.publishedAt??article.retrievedAt,summary:article.summary.slice(0,420),topic:topicFor(text),tier:feed.tier,entities:entitiesFor(text),stance:stanceFor(text)}];
+      if(!article.publishedAt)return [];
+      return [{id:`stored-${article.id}`,sourceSlug:article.sourceSlug,publisherId:publisherFor(article.sourceSlug),sourceName:article.sourceName,sourceClass:feed.sourceClass,title:article.title,url:article.url,publishedAt:article.publishedAt,summary:article.summary.slice(0,420),topic:topicFor(text),tier:feed.tier,entities:entitiesFor(text),stance:stanceFor(text)}];
     });
     if(newsResponse?.ok){
       const newsPayload=await newsResponse.json() as {news?:Array<{id:number;headline:string;summary?:string;url:string;created_at:string;source?:string;symbols?:string[]}>};
@@ -171,6 +172,13 @@ async function readPersistentBackend(){
 
 function gdeltDate(value:string){const match=value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);return match?`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`:value}
 function openAlexAbstract(index?:Record<string,number[]>){if(!index)return "";return Object.entries(index).flatMap(([word,positions])=>positions.map((position)=>[position,word] as const)).sort((a,b)=>a[0]-b[0]).map(([,word])=>word).join(" ").slice(0,420)}
+function latestStories(items:WireItem[]){
+  const now=Date.now(),oldest=now-(14*24*60*60*1000),newest=now+(6*60*60*1000);
+  return items.filter((item)=>{
+    if(item.sourceClass==="primary-research"||item.sourceSlug==="nara-uap"||item.sourceSlug==="aaro")return false;
+    const published=Date.parse(item.publishedAt);return Number.isFinite(published)&&published>=oldest&&published<=newest;
+  }).sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).slice(0,40);
+}
 
 async function readFreeApis():Promise<WireItem[]>{
   const gdeltQueries=["(energy OR oil OR gas OR gold OR silver OR commodities)","(geopolitics OR conflict OR sanctions OR election OR central bank OR artificial intelligence OR robotics)"];
@@ -199,10 +207,10 @@ export async function GET(){
     const freeApiItems=await readFreeApis();const combined=[...new Map([...persistent.items,...freeApiItems].map((item)=>[item.url,item])).values()];
     const clusters=cluster(combined);
     const healthMap=new Map(persistent.health.map((item)=>[item.slug,item]));
-    return Response.json({status:"live",generatedAt:new Date().toISOString(),persistence:"hetzner-postgresql + free public APIs",latestItems:[...combined].sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).slice(0,40),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"UAP documents, reporting and scientific research remain separate evidence classes; no extraordinary claim is inferred from government disclosure alone."},feedHealth:feeds.map((feed)=>{const health=healthMap.get(feed.slug);return {slug:feed.slug,name:feed.name,domain:feed.domain,sourceClass:feed.sourceClass,url:feed.url,status:health?.status??"stored",latencyMs:health?.latencyMs??0,itemCount:health?.received??persistent.items.filter((item)=>item.sourceSlug===feed.slug).length,error:health?.error??undefined}}),itemCount:combined.length,entityCount:new Set(combined.flatMap((item)=>item.entities)).size,clusters});
+    return Response.json({status:"live",generatedAt:new Date().toISOString(),persistence:"hetzner-postgresql + free public APIs",latestItems:latestStories(combined),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Latest stories require a verified publication timestamp within the last 14 days. Retrieval time never substitutes for publication time; research and standing documentary pages remain outside the breaking-news wire."},feedHealth:feeds.map((feed)=>{const health=healthMap.get(feed.slug);return {slug:feed.slug,name:feed.name,domain:feed.domain,sourceClass:feed.sourceClass,url:feed.url,status:health?.status??"stored",latencyMs:health?.latencyMs??0,itemCount:health?.received??persistent.items.filter((item)=>item.sourceSlug===feed.slug).length,error:health?.error??undefined}}),itemCount:combined.length,entityCount:new Set(combined.flatMap((item)=>item.entities)).size,clusters});
   }
   const [results,freeApiItems]=await Promise.all([Promise.all(feeds.map(readFeed)),readFreeApis()]);
   const deduped=[...new Map([...results.flatMap((result)=>result.items),...freeApiItems].map((item)=>[item.url,item])).values()];
   const clusters=cluster(deduped);
-  return Response.json({status:results.some((result)=>result.status==="live")?"live":"degraded",generatedAt:new Date().toISOString(),latestItems:deduped.sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).slice(0,40),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-publisher signals are explicitly labeled and never presented as confirmed"},feedHealth:results.map((result)=>({slug:result.feed.slug,name:result.feed.name,domain:result.feed.domain,sourceClass:result.feed.sourceClass,url:result.feed.url,status:result.status,latencyMs:result.latencyMs,itemCount:result.items.length,error:"error" in result?result.error:undefined})),itemCount:deduped.length,entityCount:new Set(deduped.flatMap((item)=>item.entities)).size,clusters});
+  return Response.json({status:results.some((result)=>result.status==="live")?"live":"degraded",generatedAt:new Date().toISOString(),latestItems:latestStories(deduped),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Latest stories require a verified publication timestamp within the last 14 days; single-publisher signals are explicitly labeled and never presented as confirmed."},feedHealth:results.map((result)=>({slug:result.feed.slug,name:result.feed.name,domain:result.feed.domain,sourceClass:result.feed.sourceClass,url:result.feed.url,status:result.status,latencyMs:result.latencyMs,itemCount:result.items.length,error:"error" in result?result.error:undefined})),itemCount:deduped.length,entityCount:new Set(deduped.flatMap((item)=>item.entities)).size,clusters});
 }
