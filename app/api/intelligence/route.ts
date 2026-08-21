@@ -29,7 +29,7 @@ const feeds:FeedDefinition[]=[
   {slug:"cftc-enforcement",name:"CFTC Enforcement Releases",url:"https://www.cftc.gov/RSS/RSSENF/rssenf.xml",tier:1,domain:"Commodities Enforcement",sourceClass:"official"},
   {slug:"cftc-statements",name:"CFTC Speeches & Testimony",url:"https://www.cftc.gov/RSS/RSSST/rssst.xml",tier:1,domain:"Commodities Policy",sourceClass:"official"},
   {slug:"arxiv-qbio",name:"arXiv Quantitative Biology",url:"https://export.arxiv.org/api/query?search_query=cat%3Aq-bio&sortBy=submittedDate&sortOrder=descending&max_results=30",tier:2,domain:"Biology Research",sourceClass:"primary-research"},
-  {slug:"arxiv-econ",name:"arXiv Economics",url:"https://export.arxiv.org/api/query?search_query=cat%3Aecon&sortBy=submittedDate&sortOrder=descending&max_results=30",tier:2,domain:"Economics Research",sourceClass:"primary-research"},
+  {slug:"arxiv-econ",name:"arXiv Economics",url:"https://export.arxiv.org/api/query?search_query=cat%3Aecon.EM%20OR%20cat%3Aecon.GN%20OR%20cat%3Aecon.TH&sortBy=submittedDate&sortOrder=descending&max_results=30",tier:2,domain:"Economics Research",sourceClass:"primary-research"},
   {slug:"arxiv-robotics",name:"arXiv Robotics",url:"https://export.arxiv.org/api/query?search_query=cat%3Acs.RO&sortBy=submittedDate&sortOrder=descending&max_results=30",tier:2,domain:"Robotics Research",sourceClass:"primary-research"},
   {slug:"arxiv-astrophysics",name:"arXiv Astrophysics",url:"https://export.arxiv.org/api/query?search_query=cat%3Aastro-ph&sortBy=submittedDate&sortOrder=descending&max_results=30",tier:2,domain:"Space Research",sourceClass:"primary-research"},
   {slug:"nhc-atlantic",name:"National Hurricane Center Atlantic",url:"https://www.nhc.noaa.gov/index-at.xml",tier:1,domain:"Climate & Disaster Risk",sourceClass:"official"},
@@ -176,9 +176,10 @@ async function readFreeApis():Promise<WireItem[]>{
   const gdeltQueries=["(energy OR oil OR gas OR gold OR silver OR commodities)","(geopolitics OR conflict OR sanctions OR election OR central bank OR artificial intelligence OR robotics)"];
   const openAlexQueries=["religion theology religious studies",'"unidentified anomalous phenomena" OR astrobiology OR technosignatures'];
   const openAlexKey=process.env.OPENALEX_API_KEY;
+  const today=new Date().toISOString().slice(0,10);
   const requests=[
     ...gdeltQueries.map((query)=>fetch(`https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=25&format=json&sort=datedesc`,{headers:{"User-Agent":"AULOS-NEWS/1.2"}}).then((response)=>response.ok?response.json():null).catch(()=>null)),
-    ...openAlexQueries.map((search)=>{const url=new URL("https://api.openalex.org/works");url.searchParams.set("search",search);url.searchParams.set("sort","publication_date:desc");url.searchParams.set("per-page","20");url.searchParams.set("select","id,doi,display_name,publication_date,primary_location,abstract_inverted_index,topics");if(openAlexKey)url.searchParams.set("api_key",openAlexKey);return fetch(url,{headers:{"User-Agent":"AULOS-NEWS/1.2 (mailto:research@aulos.news)"}}).then((response)=>response.ok?response.json():null).catch(()=>null)}),
+    ...openAlexQueries.map((search)=>{const url=new URL("https://api.openalex.org/works");url.searchParams.set("search",search);url.searchParams.set("filter",`to_publication_date:${today},is_paratext:false`);url.searchParams.set("sort","publication_date:desc");url.searchParams.set("per-page","20");url.searchParams.set("select","id,doi,display_name,publication_date,type,primary_location,abstract_inverted_index,topics");if(openAlexKey)url.searchParams.set("api_key",openAlexKey);return fetch(url,{headers:{"User-Agent":"AULOS-NEWS/1.2 (mailto:research@aulos.news)"}}).then((response)=>response.ok?response.json():null).catch(()=>null)}),
   ];
   const payloads=await Promise.all(requests);const items:WireItem[]=[];
   for(const payload of payloads.slice(0,gdeltQueries.length) as Array<{articles?:Array<{url:string;title:string;seendate:string;domain:string;language?:string}>}|null>){
