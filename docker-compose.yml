@@ -28,6 +28,14 @@ services:
       ALPACA_API_KEY_ID: ${ALPACA_API_KEY_ID:-}
       ALPACA_API_SECRET_KEY: ${ALPACA_API_SECRET_KEY:-}
       ALPACA_DATA_BASE_URL: ${ALPACA_DATA_BASE_URL:-https://data.alpaca.markets}
+      FRED_API_KEY: ${FRED_API_KEY:-}
+      BEA_API_KEY: ${BEA_API_KEY:-}
+      CENSUS_API_KEY: ${CENSUS_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
+      NCBI_API_KEY: ${NCBI_API_KEY:-}
+      NASA_API_KEY: ${NASA_API_KEY:-}
+      CONTACT_EMAIL: ${CONTACT_EMAIL:-}
     depends_on:
       postgres:
         condition: service_healthy
