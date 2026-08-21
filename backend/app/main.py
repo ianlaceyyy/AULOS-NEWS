@@ -4,7 +4,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import secrets
+from html import unescape
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +38,14 @@ class Settings(BaseSettings):
     alpaca_api_key_id: str = ""
     alpaca_api_secret_key: str = ""
     alpaca_data_base_url: str = "https://data.alpaca.markets"
+    fred_api_key: str = ""
+    bea_api_key: str = ""
+    census_api_key: str = ""
+    eia_api_key: str = ""
+    openalex_api_key: str = ""
+    ncbi_api_key: str = ""
+    nasa_api_key: str = ""
+    contact_email: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
@@ -102,6 +112,12 @@ def alpaca_headers() -> dict[str, str]:
     return {"APCA-API-KEY-ID": settings.alpaca_api_key_id, "APCA-API-SECRET-KEY": settings.alpaca_api_secret_key}
 
 
+def require_key(value: str, provider: str) -> str:
+    if not value:
+        raise HTTPException(status_code=503, detail=f"{provider} is not configured")
+    return value
+
+
 engine = create_engine(settings.database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 ingestion_lock = asyncio.Lock()
@@ -140,10 +156,19 @@ async def ingest_feed(client: httpx.AsyncClient, feed: dict[str, Any]) -> dict[s
     try:
         response = await client.get(feed["url"])
         response.raise_for_status()
-        parsed = feedparser.parse(response.content)
-        if parsed.bozo and not parsed.entries:
-            raise ValueError(str(parsed.bozo_exception))
-        entries = parsed.entries[: settings.max_items_per_feed]
+        if feed.get("parser") == "treasury-html":
+            seen: set[str] = set(); entries = []
+            for path, raw_title in re.findall(r'<a[^>]+href=["\'](/news/press-releases/[^"\']+)["\'][^>]*>([\s\S]*?)</a>', response.text, re.I):
+                title = unescape(re.sub(r"<[^>]+>", " ", raw_title)); title = re.sub(r"\s+", " ", title).strip()
+                url = f"https://home.treasury.gov{path}"
+                if title and url not in seen: seen.add(url); entries.append({"link": url, "title": title, "summary": "U.S. Treasury press release"})
+            entries = entries[: settings.max_items_per_feed]
+            if not entries: raise ValueError("Treasury press page returned no recognizable releases")
+        else:
+            parsed = feedparser.parse(response.content)
+            if parsed.bozo and not parsed.entries:
+                raise ValueError(str(parsed.bozo_exception))
+            entries = parsed.entries[: settings.max_items_per_feed]
         received = len(entries)
         with SessionLocal.begin() as session:
             source_id = session.scalar(select(Source.id).where(Source.slug == feed["slug"]))
@@ -178,7 +203,8 @@ async def ingest_all() -> dict[str, Any]:
     async with ingestion_lock:
         with SessionLocal() as session:
             rows = session.scalars(select(Source).where(Source.active == 1).order_by(Source.authority_tier, Source.slug)).all()
-            active_feeds = [{"slug": row.slug, "name": row.name, "category": row.category, "url": row.url, "tier": row.authority_tier} for row in rows]
+            definitions = {feed["slug"]: feed for feed in FEEDS}
+            active_feeds = [{"slug": row.slug, "name": row.name, "category": row.category, "url": row.url, "tier": row.authority_tier, "parser": definitions.get(row.slug, {}).get("parser")} for row in rows]
         headers = {"User-Agent": "AULOS-NEWS/1.1 (+https://aulos-news.ian-g-lacey2.chatgpt.site; public research aggregator)"}
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=True, headers=headers) as client:
             semaphore = asyncio.Semaphore(6)
@@ -246,6 +272,59 @@ def health() -> dict[str, Any]:
     except Exception:
         database = "unavailable"
     return {"status": "ok" if database == "connected" else "degraded", "database": database, "lastCycle": last_cycle}
+
+
+@app.get("/v1/providers")
+def provider_status() -> dict[str, Any]:
+    configured = {
+        "alpaca": bool(settings.alpaca_api_key_id and settings.alpaca_api_secret_key),
+        "fred": bool(settings.fred_api_key), "bea": bool(settings.bea_api_key),
+        "census": bool(settings.census_api_key), "eia": bool(settings.eia_api_key),
+        "openalex": bool(settings.openalex_api_key), "ncbi": bool(settings.ncbi_api_key),
+        "nasa": bool(settings.nasa_api_key),
+    }
+    return {"configured": configured, "configuredCount": sum(configured.values()), "total": len(configured)}
+
+
+@app.get("/v1/data/macro")
+async def macro_data() -> dict[str, Any]:
+    key = require_key(settings.fred_api_key, "FRED")
+    series = {"DGS2": "2-year Treasury", "DGS10": "10-year Treasury", "DGS30": "30-year Treasury", "T10Y2Y": "10s–2s spread", "UNRATE": "Unemployment rate", "CPIAUCSL": "Consumer Price Index", "PAYEMS": "Nonfarm payrolls"}
+    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        async def latest(series_id: str, label: str) -> dict[str, Any] | None:
+            response = await client.get("https://api.stlouisfed.org/fred/series/observations", params={"series_id": series_id, "api_key": key, "file_type": "json", "sort_order": "desc", "limit": 10})
+            if not response.is_success: return None
+            observation = next((row for row in response.json().get("observations", []) if row.get("value") != "."), None)
+            return {"seriesId": series_id, "label": label, "date": observation["date"], "value": float(observation["value"])} if observation else None
+        values = await asyncio.gather(*(latest(series_id, label) for series_id, label in series.items()))
+    return {"status": "live", "provider": "FRED", "retrievedAt": datetime.now(timezone.utc).isoformat(), "data": [value for value in values if value]}
+
+
+@app.get("/v1/data/energy")
+async def energy_data() -> dict[str, Any]:
+    key = require_key(settings.eia_api_key, "EIA")
+    series = {"PET.RBRTE.D": "Brent crude spot", "PET.RWTC.D": "WTI crude spot", "NG.RNGWHHD.D": "Henry Hub natural gas", "PET.WCESTUS1.W": "U.S. crude oil inventories"}
+    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        async def latest(series_id: str, label: str) -> dict[str, Any] | None:
+            response = await client.get(f"https://api.eia.gov/v2/seriesid/{series_id}", params={"api_key": key, "length": 2})
+            if not response.is_success: return None
+            rows = response.json().get("response", {}).get("data", [])
+            row = rows[0] if rows else None
+            if not row: return None
+            value_key = next((field for field in ("value", "price") if field in row), None)
+            if not value_key: return None
+            return {"seriesId": series_id, "label": label, "date": row.get("period"), "value": float(row[value_key]), "unit": row.get(f"{value_key}-units", "")}
+        values = await asyncio.gather(*(latest(series_id, label) for series_id, label in series.items()))
+    return {"status": "live", "provider": "U.S. EIA", "retrievedAt": datetime.now(timezone.utc).isoformat(), "data": [value for value in values if value]}
+
+
+@app.get("/v1/research/search")
+async def research_search(query: str = Query(default="religion OR astrobiology OR unidentified anomalous phenomena"), limit: int = Query(default=20, ge=1, le=50)) -> dict[str, Any]:
+    key = require_key(settings.openalex_api_key, "OpenAlex")
+    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        response = await client.get("https://api.openalex.org/works", params={"api_key": key, "search": query, "sort": "publication_date:desc", "per-page": limit, "select": "id,doi,display_name,publication_date,primary_location,topics"})
+    if not response.is_success: raise HTTPException(status_code=502, detail=f"OpenAlex returned {response.status_code}")
+    return {"status": "live", "provider": "OpenAlex", "retrievedAt": datetime.now(timezone.utc).isoformat(), "works": response.json().get("results", [])}
 
 
 @app.get("/v1/sources")
