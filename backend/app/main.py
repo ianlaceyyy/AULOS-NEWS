@@ -148,9 +148,10 @@ async def ingest_feed(client: httpx.AsyncClient, feed: dict[str, Any]) -> dict[s
                     insert(Article).values(
                         source_id=source_id, canonical_url=url, title=title, summary=summary,
                         content_hash=digest, published_at=parsed_datetime(entry),
-                    ).on_conflict_do_nothing(index_elements=[Article.canonical_url])
+                    ).on_conflict_do_nothing(index_elements=[Article.canonical_url]).returning(Article.id)
                 )
-                inserted_count += result.rowcount or 0
+                if result.scalar_one_or_none() is not None:
+                    inserted_count += 1
     except Exception as exc:  # keep one failed publisher from stopping the cycle
         status, message = "degraded", str(exc)[:1000]
         log.warning("Feed %s failed: %s", feed["slug"], exc)
