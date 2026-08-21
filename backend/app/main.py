@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     max_items_per_feed: int = 30
     admin_token: str = ""
     cors_origins: str = "https://aulos-news.ian-g-lacey2.chatgpt.site"
+    alpaca_api_key_id: str = ""
+    alpaca_api_secret_key: str = ""
+    alpaca_data_base_url: str = "https://data.alpaca.markets"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
@@ -91,6 +94,12 @@ class IngestionRun(Base):
 
 class SourceState(BaseModel):
     active: bool
+
+
+def alpaca_headers() -> dict[str, str]:
+    if not settings.alpaca_api_key_id or not settings.alpaca_api_secret_key:
+        raise HTTPException(status_code=503, detail="Alpaca market data is not configured")
+    return {"APCA-API-KEY-ID": settings.alpaca_api_key_id, "APCA-API-SECRET-KEY": settings.alpaca_api_secret_key}
 
 
 engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -254,6 +263,25 @@ def articles(limit: int = Query(default=100, ge=1, le=500), source: str | None =
             query = query.where(Source.slug == source)
         rows = session.scalars(query).all()
         return {"count": len(rows), "articles": [{"id": row.id, "sourceSlug": row.source.slug, "sourceName": row.source.name, "title": row.title, "summary": row.summary, "url": row.canonical_url, "publishedAt": row.published_at.isoformat() if row.published_at else None, "retrievedAt": row.retrieved_at.isoformat()} for row in rows]}
+
+
+@app.get("/v1/markets/snapshots")
+async def market_snapshots(symbols: str = Query(default="SPY,QQQ,IWM,GLD,SLV,USO")) -> dict[str, Any]:
+    requested = ",".join(symbol.strip().upper() for symbol in symbols.split(",") if symbol.strip())[:250]
+    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        response = await client.get(f"{settings.alpaca_data_base_url.rstrip('/')}/v2/stocks/snapshots", params={"symbols": requested}, headers=alpaca_headers())
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Market data provider returned {response.status_code}")
+    return {"status": "live", "provider": "Alpaca Market Data", "retrievedAt": datetime.now(timezone.utc).isoformat(), "symbols": response.json()}
+
+
+@app.get("/v1/news")
+async def live_news(limit: int = Query(default=50, ge=1, le=50)) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+        response = await client.get(f"{settings.alpaca_data_base_url.rstrip('/')}/v1beta1/news", params={"limit": limit, "sort": "desc", "include_content": "false"}, headers=alpaca_headers())
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"News provider returned {response.status_code}")
+    return {"status": "live", "provider": "Alpaca News", "retrievedAt": datetime.now(timezone.utc).isoformat(), **response.json()}
 
 
 @app.patch("/v1/sources/{slug}", dependencies=[Depends(require_admin)])
