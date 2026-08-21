@@ -289,23 +289,38 @@ def provider_status() -> dict[str, Any]:
 @app.get("/v1/data/macro")
 async def macro_data() -> dict[str, Any]:
     key = require_key(settings.fred_api_key, "FRED")
-    series = {"DGS2": "2-year Treasury", "DGS10": "10-year Treasury", "DGS30": "30-year Treasury", "T10Y2Y": "10s–2s spread", "UNRATE": "Unemployment rate", "CPIAUCSL": "Consumer Price Index", "PAYEMS": "Nonfarm payrolls"}
+    series = {
+        "DGS2": {"label": "2-year Treasury", "unit": "%", "scale": 1},
+        "DGS10": {"label": "10-year Treasury", "unit": "%", "scale": 1},
+        "DGS30": {"label": "30-year Treasury", "unit": "%", "scale": 1},
+        "T10Y2Y": {"label": "10s–2s spread", "unit": "basis points", "scale": 100},
+        "UNRATE": {"label": "Unemployment rate", "unit": "%", "scale": 1},
+        "CPIAUCSL": {"label": "Consumer Price Index", "unit": "index 1982–84=100", "scale": 1},
+        "PAYEMS": {"label": "Nonfarm payroll employment", "unit": "thousands of persons", "scale": 1},
+    }
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        async def latest(series_id: str, label: str) -> dict[str, Any] | None:
+        async def latest(series_id: str, metadata: dict[str, Any]) -> dict[str, Any] | None:
             response = await client.get("https://api.stlouisfed.org/fred/series/observations", params={"series_id": series_id, "api_key": key, "file_type": "json", "sort_order": "desc", "limit": 10})
             if not response.is_success: return None
             observation = next((row for row in response.json().get("observations", []) if row.get("value") != "."), None)
-            return {"seriesId": series_id, "label": label, "date": observation["date"], "value": float(observation["value"])} if observation else None
-        values = await asyncio.gather(*(latest(series_id, label) for series_id, label in series.items()))
+            if not observation: return None
+            raw_value = float(observation["value"])
+            return {"seriesId": series_id, "label": metadata["label"], "date": observation["date"], "value": raw_value * metadata["scale"], "rawValue": raw_value, "unit": metadata["unit"]}
+        values = await asyncio.gather(*(latest(series_id, metadata) for series_id, metadata in series.items()))
     return {"status": "live", "provider": "FRED", "retrievedAt": datetime.now(timezone.utc).isoformat(), "data": [value for value in values if value]}
 
 
 @app.get("/v1/data/energy")
 async def energy_data() -> dict[str, Any]:
     key = require_key(settings.eia_api_key, "EIA")
-    series = {"PET.RBRTE.D": "Brent crude spot", "PET.RWTC.D": "WTI crude spot", "NG.RNGWHHD.D": "Henry Hub natural gas", "PET.WCESTUS1.W": "U.S. crude oil inventories"}
+    series = {
+        "PET.RBRTE.D": {"label": "Brent crude spot", "unit": "USD/barrel"},
+        "PET.RWTC.D": {"label": "WTI crude spot", "unit": "USD/barrel"},
+        "NG.RNGWHHD.D": {"label": "Henry Hub natural gas", "unit": "USD/MMBtu"},
+        "PET.WCESTUS1.W": {"label": "U.S. crude oil inventories", "unit": "thousand barrels"},
+    }
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        async def latest(series_id: str, label: str) -> dict[str, Any] | None:
+        async def latest(series_id: str, metadata: dict[str, str]) -> dict[str, Any] | None:
             response = await client.get(f"https://api.eia.gov/v2/seriesid/{series_id}", params={"api_key": key, "length": 2})
             if not response.is_success: return None
             rows = response.json().get("response", {}).get("data", [])
@@ -313,18 +328,31 @@ async def energy_data() -> dict[str, Any]:
             if not row: return None
             value_key = next((field for field in ("value", "price") if field in row), None)
             if not value_key: return None
-            return {"seriesId": series_id, "label": label, "date": row.get("period"), "value": float(row[value_key]), "unit": row.get(f"{value_key}-units", "")}
-        values = await asyncio.gather(*(latest(series_id, label) for series_id, label in series.items()))
+            return {"seriesId": series_id, "label": metadata["label"], "date": row.get("period"), "value": float(row[value_key]), "unit": metadata["unit"]}
+        values = await asyncio.gather(*(latest(series_id, metadata) for series_id, metadata in series.items()))
     return {"status": "live", "provider": "U.S. EIA", "retrievedAt": datetime.now(timezone.utc).isoformat(), "data": [value for value in values if value]}
 
 
 @app.get("/v1/research/search")
 async def research_search(query: str = Query(default="religion OR astrobiology OR unidentified anomalous phenomena"), limit: int = Query(default=20, ge=1, le=50)) -> dict[str, Any]:
     key = require_key(settings.openalex_api_key, "OpenAlex")
+    today = datetime.now(timezone.utc).date().isoformat()
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        response = await client.get("https://api.openalex.org/works", params={"api_key": key, "search": query, "sort": "publication_date:desc", "per-page": limit, "select": "id,doi,display_name,publication_date,primary_location,topics"})
+        response = await client.get("https://api.openalex.org/works", params={"api_key": key, "search": query, "filter": f"to_publication_date:{today},is_paratext:false", "sort": "publication_date:desc", "per-page": limit, "select": "id,doi,display_name,publication_date,type,primary_location,topics"})
     if not response.is_success: raise HTTPException(status_code=502, detail=f"OpenAlex returned {response.status_code}")
-    return {"status": "live", "provider": "OpenAlex", "retrievedAt": datetime.now(timezone.utc).isoformat(), "works": response.json().get("results", [])}
+    works = []
+    for work in response.json().get("results", []):
+        location = work.get("primary_location") or {}
+        source = location.get("source") or {}
+        works.append({
+            "id": work.get("id"), "doi": work.get("doi"), "title": work.get("display_name"),
+            "publicationDate": work.get("publication_date"), "workType": work.get("type") or location.get("raw_type") or "other",
+            "publicationStatus": "published" if location.get("is_published") else "accepted" if location.get("is_accepted") else "indexed",
+            "isOpenAccess": bool(location.get("is_oa")), "landingPageUrl": location.get("landing_page_url"),
+            "pdfUrl": location.get("pdf_url"), "sourceName": source.get("display_name"),
+            "topics": [topic.get("display_name") for topic in work.get("topics", []) if topic.get("display_name")],
+        })
+    return {"status": "live", "provider": "OpenAlex", "retrievedAt": datetime.now(timezone.utc).isoformat(), "asOfDate": today, "works": works}
 
 
 @app.get("/v1/sources")
