@@ -37,9 +37,10 @@ export async function GET(){
   const url=`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${Object.keys(seriesMeta).join(",")}&cosd=${start}&coed=${end}`;
   try{
     const baseUrl=process.env.AULOS_BACKEND_URL?.replace(/\/$/,"");
-    const [response,marketResponse]=await Promise.all([
+    const [response,marketResponse,energyResponse]=await Promise.all([
       fetch(url,{headers:{"User-Agent":"AULOS-NEWS/0.3 (research intelligence platform)"}}),
       baseUrl?fetch(`${baseUrl}/v1/markets/snapshots?symbols=SPY,QQQ,IWM,GLD,SLV,USO`,{headers:{"User-Agent":"AULOS-NEWS-Frontend/1.1"}}).catch(()=>null):Promise.resolve(null),
+      baseUrl?fetch(`${baseUrl}/v1/data/energy`,{headers:{"User-Agent":"AULOS-NEWS-Frontend/1.2"}}).catch(()=>null):Promise.resolve(null),
     ]);
     if(!response.ok)throw new Error(`FRED returned ${response.status}`);
     const data=latestObservations(await response.text());
@@ -54,7 +55,12 @@ export async function GET(){
         data.unshift({seriesId:`ALPACA:${symbol}`,label:labels[symbol]??symbol,date:snapshot.latestTrade?.t??snapshot.dailyBar?.t??new Date().toISOString(),value,display:`$${value.toFixed(2)}${move===null?"":` · ${move>=0?"+":""}${move.toFixed(2)}%`}`});
       }
     }
-    return Response.json({status:"live",source:marketResponse?.ok?"Alpaca Market Data + FRED":"FRED",retrievedAt:new Date().toISOString(),latencyMs:Date.now()-started,persistence:"hetzner-proxy",data,registry});
+    if(energyResponse?.ok){
+      const energy=await energyResponse.json() as {data?:Array<{seriesId:string;label:string;date:string;value:number;unit:string}>};
+      for(const item of energy.data??[])data.push({seriesId:`EIA:${item.seriesId}`,label:item.label,date:item.date,value:item.value,display:`${item.value.toLocaleString()}${item.unit?` ${item.unit}`:""}`});
+    }
+    const providers=[marketResponse?.ok?"Alpaca":null,energyResponse?.ok?"EIA":null,"FRED"].filter(Boolean).join(" + ");
+    return Response.json({status:"live",source:providers,retrievedAt:new Date().toISOString(),latencyMs:Date.now()-started,persistence:"hetzner-proxy",data,registry});
   }catch(error){
     return Response.json({status:"degraded",source:"FRED",retrievedAt:new Date().toISOString(),error:error instanceof Error?error.message:"Live source unavailable",data:[],registry}); }
 }
