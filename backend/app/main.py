@@ -130,7 +130,7 @@ async def ingest_feed(client: httpx.AsyncClient, feed: dict[str, Any]) -> dict[s
     try:
         response = await client.get(feed["url"])
         response.raise_for_status()
-        parsed = feedparser.loads(response.content)
+        parsed = feedparser.parse(response.content)
         if parsed.bozo and not parsed.entries:
             raise ValueError(str(parsed.bozo_exception))
         entries = parsed.entries[: settings.max_items_per_feed]
