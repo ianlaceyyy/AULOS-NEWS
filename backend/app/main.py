@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -13,8 +15,9 @@ import feedparser
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, desc, select
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, desc, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
@@ -24,7 +27,7 @@ log = logging.getLogger("aulos.ingestion")
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+psycopg://aulos:aulos@postgres:5432/aulos"
+    database_url: str
     poll_interval_seconds: int = 300
     request_timeout_seconds: int = 20
     max_items_per_feed: int = 30
@@ -39,17 +42,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-FEEDS = [
-    {"slug": "fed-all", "name": "Federal Reserve Board", "category": "Policy & Banking", "url": "https://www.federalreserve.gov/feeds/press_all.xml", "tier": 1},
-    {"slug": "fed-monetary", "name": "Federal Reserve Monetary Policy", "category": "Monetary Policy", "url": "https://www.federalreserve.gov/feeds/press_monetary.xml", "tier": 1},
-    {"slug": "bls-jobs", "name": "BLS Employment Situation", "category": "Labor", "url": "https://www.bls.gov/feed/empsit.rss", "tier": 1},
-    {"slug": "bls-cpi", "name": "BLS Consumer Price Index", "category": "Inflation", "url": "https://www.bls.gov/feed/cpi.rss", "tier": 1},
-    {"slug": "eia-today", "name": "EIA Today in Energy", "category": "Energy", "url": "https://www.eia.gov/rss/todayinenergy.xml", "tier": 1},
-    {"slug": "eia-press", "name": "EIA Press Releases", "category": "Energy", "url": "https://www.eia.gov/rss/press_rss.xml", "tier": 1},
-    {"slug": "sec-press", "name": "SEC Press Releases", "category": "Capital Markets", "url": "https://www.sec.gov/news/pressreleases.rss", "tier": 1},
-    {"slug": "nasa-releases", "name": "NASA News Releases", "category": "Science & Space", "url": "https://www.nasa.gov/news-release/feed/", "tier": 1},
-    {"slug": "arxiv-ai", "name": "arXiv Artificial Intelligence", "category": "AI Research", "url": "https://export.arxiv.org/api/query?search_query=cat%3Acs.AI&sortBy=submittedDate&sortOrder=descending&max_results=30", "tier": 2},
-]
+FEEDS: list[dict[str, Any]] = json.loads(Path(__file__).with_name("sources.json").read_text())
 
 
 class Base(DeclarativeBase):
@@ -64,6 +57,9 @@ class Source(Base):
     category: Mapped[str] = mapped_column(String(120))
     url: Mapped[str] = mapped_column(Text)
     authority_tier: Mapped[int] = mapped_column(Integer)
+    source_class: Mapped[str] = mapped_column(String(50), default="official")
+    geography: Mapped[str] = mapped_column(String(100), default="Global")
+    publisher_type: Mapped[str] = mapped_column(String(100), default="institution")
     active: Mapped[int] = mapped_column(Integer, default=1)
     articles: Mapped[list["Article"]] = relationship(back_populates="source")
 
@@ -93,6 +89,10 @@ class IngestionRun(Base):
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 
+class SourceState(BaseModel):
+    active: bool
+
+
 engine = create_engine(settings.database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 ingestion_lock = asyncio.Lock()
@@ -116,10 +116,11 @@ def seed_sources() -> None:
         for feed in FEEDS:
             statement = insert(Source).values(
                 slug=feed["slug"], name=feed["name"], category=feed["category"],
-                url=feed["url"], authority_tier=feed["tier"], active=1,
+                url=feed["url"], authority_tier=feed["tier"], source_class=feed["source_class"],
+                geography=feed["geography"], publisher_type=feed["publisher_type"], active=1,
             ).on_conflict_do_update(
                 index_elements=[Source.slug],
-                set_={"name": feed["name"], "category": feed["category"], "url": feed["url"], "authority_tier": feed["tier"]},
+                set_={"name": feed["name"], "category": feed["category"], "url": feed["url"], "authority_tier": feed["tier"], "source_class": feed["source_class"], "geography": feed["geography"], "publisher_type": feed["publisher_type"]},
             )
             session.execute(statement)
 
@@ -166,9 +167,16 @@ async def ingest_all() -> dict[str, Any]:
     if ingestion_lock.locked():
         return {"status": "already_running"}
     async with ingestion_lock:
-        headers = {"User-Agent": "AULOS-NEWS/1.0 (+https://aulos-news.ian-g-lacey2.chatgpt.site; research aggregator)"}
+        with SessionLocal() as session:
+            rows = session.scalars(select(Source).where(Source.active == 1).order_by(Source.authority_tier, Source.slug)).all()
+            active_feeds = [{"slug": row.slug, "name": row.name, "category": row.category, "url": row.url, "tier": row.authority_tier} for row in rows]
+        headers = {"User-Agent": "AULOS-NEWS/1.1 (+https://aulos-news.ian-g-lacey2.chatgpt.site; public research aggregator)"}
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=True, headers=headers) as client:
-            results = await asyncio.gather(*(ingest_feed(client, feed) for feed in FEEDS))
+            semaphore = asyncio.Semaphore(6)
+            async def limited(feed: dict[str, Any]) -> dict[str, Any]:
+                async with semaphore:
+                    return await ingest_feed(client, feed)
+            results = await asyncio.gather(*(limited(feed) for feed in active_feeds))
         last_cycle = {
             "status": "live" if any(item["status"] == "live" for item in results) else "degraded",
             "completedAt": datetime.now(timezone.utc).isoformat(),
@@ -187,9 +195,17 @@ async def scheduler() -> None:
         await asyncio.sleep(max(60, settings.poll_interval_seconds))
 
 
+def upgrade_schema() -> None:
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS source_class VARCHAR(50) NOT NULL DEFAULT 'official'"))
+        connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS geography VARCHAR(100) NOT NULL DEFAULT 'Global'"))
+        connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS publisher_type VARCHAR(100) NOT NULL DEFAULT 'institution'"))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(engine)
+    upgrade_schema()
     seed_sources()
     task = asyncio.create_task(scheduler())
     yield
@@ -227,7 +243,7 @@ def health() -> dict[str, Any]:
 def sources() -> dict[str, Any]:
     with SessionLocal() as session:
         rows = session.scalars(select(Source).order_by(Source.authority_tier, Source.name)).all()
-        return {"count": len(rows), "sources": [{"slug": row.slug, "name": row.name, "category": row.category, "url": row.url, "authorityTier": row.authority_tier} for row in rows]}
+        return {"count": len(rows), "sources": [{"slug": row.slug, "name": row.name, "category": row.category, "url": row.url, "authorityTier": row.authority_tier, "sourceClass": row.source_class, "geography": row.geography, "publisherType": row.publisher_type, "active": bool(row.active)} for row in rows]}
 
 
 @app.get("/v1/articles")
@@ -238,6 +254,16 @@ def articles(limit: int = Query(default=100, ge=1, le=500), source: str | None =
             query = query.where(Source.slug == source)
         rows = session.scalars(query).all()
         return {"count": len(rows), "articles": [{"id": row.id, "sourceSlug": row.source.slug, "sourceName": row.source.name, "title": row.title, "summary": row.summary, "url": row.canonical_url, "publishedAt": row.published_at.isoformat() if row.published_at else None, "retrievedAt": row.retrieved_at.isoformat()} for row in rows]}
+
+
+@app.patch("/v1/sources/{slug}", dependencies=[Depends(require_admin)])
+def set_source_state(slug: str, state: SourceState) -> dict[str, Any]:
+    with SessionLocal.begin() as session:
+        source = session.scalar(select(Source).where(Source.slug == slug))
+        if source is None:
+            raise HTTPException(status_code=404, detail="Source not found")
+        source.active = int(state.active)
+        return {"slug": source.slug, "active": state.active}
 
 
 @app.post("/v1/ingest/run", dependencies=[Depends(require_admin)])

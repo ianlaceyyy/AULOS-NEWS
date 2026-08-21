@@ -17,7 +17,7 @@ The first vertical slice includes:
 - Confidence and source-mix transparency
 - Responsive desktop and mobile layouts
 
-The current vertical slice retrieves live official feeds and FRED observations. A persistent Hetzner ingestion service now stores normalized, deduplicated source records in PostgreSQL on a recurring schedule.
+The current vertical slice retrieves live official feeds and FRED observations. A persistent Hetzner ingestion service stores normalized, deduplicated source records in PostgreSQL on a recurring schedule. The registry spans monetary and fiscal policy, macro statistics, capital markets, commodities, energy, sanctions, AI, robotics, biology, space, and climate risk.
 
 ## Product principles
 
@@ -55,7 +55,7 @@ npm run build
 
 ## Persistent ingestion backend
 
-The separate Hetzner stack includes a FastAPI ingestion service, PostgreSQL, scheduled polling, URL-level deduplication, feed health history, and a Caddy reverse proxy.
+The separate Hetzner stack includes a FastAPI ingestion service, PostgreSQL, scheduled polling, URL-level deduplication, feed health history, a source registry with authority and provenance metadata, and a Caddy reverse proxy.
 
 ```bash
 cp .env.example .env

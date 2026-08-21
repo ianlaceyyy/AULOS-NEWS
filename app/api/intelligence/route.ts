@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 type FeedDefinition={slug:string;name:string;url:string;tier:number;domain:string;sourceClass:"official"|"primary-research"};
 type Stance="upward"|"downward"|"restrictive"|"supportive"|"finding"|"neutral";
-type WireItem={id:string;sourceSlug:string;sourceName:string;sourceClass:FeedDefinition["sourceClass"];title:string;url:string;publishedAt:string;summary:string;topic:string;tier:number;entities:string[];stance:Stance};
+type WireItem={id:string;sourceSlug:string;publisherId:string;sourceName:string;sourceClass:FeedDefinition["sourceClass"];title:string;url:string;publishedAt:string;summary:string;topic:string;tier:number;entities:string[];stance:Stance};
 
 const feeds:FeedDefinition[]=[
   {slug:"fed-all",name:"Federal Reserve Board",url:"https://www.federalreserve.gov/feeds/press_all.xml",tier:1,domain:"Policy & Banking",sourceClass:"official"},
@@ -14,6 +14,24 @@ const feeds:FeedDefinition[]=[
   {slug:"sec-press",name:"SEC Press Releases",url:"https://www.sec.gov/news/pressreleases.rss",tier:1,domain:"Capital Markets",sourceClass:"official"},
   {slug:"nasa-releases",name:"NASA News Releases",url:"https://www.nasa.gov/news-release/feed/",tier:1,domain:"Science & Space",sourceClass:"official"},
   {slug:"arxiv-ai",name:"arXiv Artificial Intelligence",url:"https://export.arxiv.org/api/query?search_query=cat%3Acs.AI&sortBy=submittedDate&sortOrder=descending&max_results=12",tier:2,domain:"AI Research",sourceClass:"primary-research"},
+  {slug:"treasury-press",name:"U.S. Treasury Press Releases",url:"https://home.treasury.gov/news/press-releases/feed",tier:1,domain:"Fiscal, Markets & Sanctions",sourceClass:"official"},
+  {slug:"bea-releases",name:"Bureau of Economic Analysis",url:"https://apps.bea.gov/rss/rss.xml",tier:1,domain:"National Accounts",sourceClass:"official"},
+  {slug:"ecb-press",name:"European Central Bank News",url:"https://www.ecb.europa.eu/rss/press.html",tier:1,domain:"Monetary Policy",sourceClass:"official"},
+  {slug:"ecb-statistics",name:"European Central Bank Statistics",url:"https://www.ecb.europa.eu/rss/statpress.html",tier:1,domain:"Macro & Markets",sourceClass:"official"},
+  {slug:"ecb-operations",name:"ECB Market Operations",url:"https://www.ecb.europa.eu/rss/operations.html",tier:1,domain:"Markets & Liquidity",sourceClass:"official"},
+  {slug:"boe-news",name:"Bank of England",url:"https://www.bankofengland.co.uk/rss/news",tier:1,domain:"Monetary Policy & Stability",sourceClass:"official"},
+  {slug:"bis-press",name:"Bank for International Settlements",url:"https://www.bis.org/doclist/all_pressrels.rss",tier:1,domain:"Global Banking",sourceClass:"official"},
+  {slug:"bis-statistics",name:"BIS Statistical Releases",url:"https://www.bis.org/doclist/all_statistics.rss",tier:1,domain:"Global Markets Data",sourceClass:"official"},
+  {slug:"bis-research",name:"BIS Research Hub",url:"https://www.bis.org/doclist/reshub_papers.rss",tier:2,domain:"Economics Research",sourceClass:"primary-research"},
+  {slug:"bis-speeches",name:"Central Bankers' Speeches",url:"https://www.bis.org/doclist/cbspeeches.rss",tier:1,domain:"Monetary Policy",sourceClass:"official"},
+  {slug:"cftc-general",name:"CFTC Press Releases",url:"https://www.cftc.gov/RSS/RSSGP/rssgp.xml",tier:1,domain:"Commodities & Derivatives",sourceClass:"official"},
+  {slug:"cftc-enforcement",name:"CFTC Enforcement Releases",url:"https://www.cftc.gov/RSS/RSSENF/rssenf.xml",tier:1,domain:"Commodities Enforcement",sourceClass:"official"},
+  {slug:"cftc-statements",name:"CFTC Speeches & Testimony",url:"https://www.cftc.gov/RSS/RSSST/rssst.xml",tier:1,domain:"Commodities Policy",sourceClass:"official"},
+  {slug:"arxiv-qbio",name:"arXiv Quantitative Biology",url:"https://export.arxiv.org/api/query?search_query=cat%3Aq-bio&sortBy=submittedDate&sortOrder=descending&max_results=30",tier:2,domain:"Biology Research",sourceClass:"primary-research"},
+  {slug:"arxiv-econ",name:"arXiv Economics",url:"https://export.arxiv.org/api/query?search_query=cat%3Aecon&sortBy=submittedDate&sortOrder=descending&max_results=30",tier:2,domain:"Economics Research",sourceClass:"primary-research"},
+  {slug:"arxiv-robotics",name:"arXiv Robotics",url:"https://export.arxiv.org/api/query?search_query=cat%3Acs.RO&sortBy=submittedDate&sortOrder=descending&max_results=30",tier:2,domain:"Robotics Research",sourceClass:"primary-research"},
+  {slug:"arxiv-astrophysics",name:"arXiv Astrophysics",url:"https://export.arxiv.org/api/query?search_query=cat%3Aastro-ph&sortBy=submittedDate&sortOrder=descending&max_results=30",tier:2,domain:"Space Research",sourceClass:"primary-research"},
+  {slug:"nhc-atlantic",name:"National Hurricane Center Atlantic",url:"https://www.nhc.noaa.gov/index-at.xml",tier:1,domain:"Climate & Disaster Risk",sourceClass:"official"},
 ];
 
 const topicRules:[string,RegExp][]=[
@@ -27,6 +45,12 @@ const topicRules:[string,RegExp][]=[
   ["Biology & medicine",/biology|biomedical|clinical|cancer|brain|genom|protein|disease|therapy|patient/i],
   ["Space & planetary science",/nasa|space|lunar|moon|mars|planet|asteroid|telescope|galaxy|orbit/i],
   ["Capital-markets regulation",/sec|securities|exchange-traded|investor|fraud|offering|broker|market structure/i],
+  ["Fiscal policy & sovereign debt",/treasury|fiscal|government debt|budget|deficit|tax credit|refunding|auction/i],
+  ["Sanctions & illicit finance",/sanction|ofac|money laundering|terrorist financ|illicit financ|cartel|smuggl/i],
+  ["Global trade & growth",/gross domestic product|\bgdp\b|international trade|imports|exports|current account|economic growth/i],
+  ["Commodities & derivatives",/commodity|commodities|derivative|futures|swap|cftc|gold|silver|copper/i],
+  ["Climate & disaster risk",/hurricane|tropical storm|climate|flood|drought|wildfire|extreme weather/i],
+  ["Geopolitics & security",/war|conflict|military|security|geopolit|ukraine|russia|china|taiwan|iran|israel|gaza/i],
 ];
 
 const entityRules:[string,RegExp][]=[
@@ -35,6 +59,8 @@ const entityRules:[string,RegExp][]=[
   ["Treasuries",/treasury|yield curve|interest rate/i],["Oil",/oil|crude|petroleum|gasoline/i],["Natural gas",/natural gas|\blng\b/i],
   ["Electricity grid",/electricity|power grid|electric grid/i],["Artificial intelligence",/artificial intelligence|machine learning|language model|neural/i],
   ["Robotics",/robot|robotics|autonomous system/i],["Biotechnology",/biotech|genom|protein|cell therapy|clinical trial/i],["Space",/space|lunar|moon|mars|orbit/i],
+  ["U.S. Treasury",/u\.s\. treasury|department of the treasury|treasury secretary/i],["European Central Bank",/european central bank|\becb\b/i],["Bank of England",/bank of england|\bmpc\b/i],
+  ["BIS",/bank for international settlements|\bbis\b/i],["CFTC",/commodity futures trading commission|\bcftc\b/i],["China",/china|chinese|beijing/i],["Russia",/russia|russian|moscow/i],["Ukraine",/ukraine|ukrainian|kyiv/i],
 ];
 
 function decode(value:string){return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1").replace(/<[^>]+>/g," ").replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/\s+/g," ").trim()}
@@ -45,6 +71,7 @@ function entitiesFor(text:string){return entityRules.filter(([,rule])=>rule.test
 function stanceFor(text:string):Stance{if(/fell|falling|declin|decreas|lower|cool|contract|drop|slower|weaken/i.test(text))return "downward";if(/rose|rising|increas|higher|accelerat|expand|growth|record/i.test(text))return "upward";if(/tighten|restrict|ban|charge|enforcement|penalt|fraud/i.test(text))return "restrictive";if(/support|fund|approve|ease|relief|launch|open access/i.test(text))return "supportive";if(/finds|finding|discover|study|research|evidence|trial/i.test(text))return "finding";return "neutral"}
 function cleanUrl(url:string){try{const parsed=new URL(url);parsed.hash="";return parsed.toString()}catch{return url}}
 function hash(value:string){let result=2166136261;for(let i=0;i<value.length;i+=1){result^=value.charCodeAt(i);result=Math.imul(result,16777619)}return (result>>>0).toString(36)}
+function publisherFor(slug:string){if(slug.startsWith("fed-"))return "federal-reserve";if(slug.startsWith("bls-"))return "bls";if(slug.startsWith("eia-"))return "eia";if(slug.startsWith("ecb-"))return "ecb";if(slug.startsWith("bis-"))return "bis";if(slug.startsWith("cftc-"))return "cftc";if(slug.startsWith("arxiv-"))return "arxiv";return slug}
 
 function parseFeed(xml:string,feed:FeedDefinition):WireItem[]{
   const blocks=[...(xml.match(/<item\b[\s\S]*?<\/item>/gi)??[]),...(xml.match(/<entry\b[\s\S]*?<\/entry>/gi)??[])];
@@ -56,7 +83,7 @@ function parseFeed(xml:string,feed:FeedDefinition):WireItem[]{
     if(!title||!url)return [];
     const summary=(field(block,"description")||field(block,"summary")||field(block,"content")).slice(0,420);
     const text=`${title} ${summary}`;
-    return [{id:`${feed.slug}-${hash(url)}`,sourceSlug:feed.slug,sourceName:feed.name,sourceClass:feed.sourceClass,title,url,publishedAt:Number.isNaN(date.valueOf())?"":date.toISOString(),summary,topic:topicFor(text),tier:feed.tier,entities:entitiesFor(text),stance:stanceFor(text)}];
+    return [{id:`${feed.slug}-${hash(url)}`,sourceSlug:feed.slug,publisherId:publisherFor(feed.slug),sourceName:feed.name,sourceClass:feed.sourceClass,title,url,publishedAt:Number.isNaN(date.valueOf())?"":date.toISOString(),summary,topic:topicFor(text),tier:feed.tier,entities:entitiesFor(text),stance:stanceFor(text)}];
   });
 }
 
@@ -87,8 +114,8 @@ function cluster(items:WireItem[]){
     if(match)match.items.push(item);else groups.push({topic:item.topic,items:[item]});
   }
   return groups.map((group,index)=>{
-    const uniqueSources=new Set(group.items.map((item)=>item.sourceSlug));
-    const crossSource=uniqueSources.size>1;
+    const uniquePublishers=new Set(group.items.map((item)=>item.publisherId));
+    const crossSource=uniquePublishers.size>1;
     const newest=group.items[0];
     const evidence=group.items.slice(0,6);
     const entityCounts=new Map<string,number>();group.items.flatMap((item)=>item.entities).forEach((entity)=>entityCounts.set(entity,(entityCounts.get(entity)??0)+1));
@@ -97,7 +124,7 @@ function cluster(items:WireItem[]){
     const agreement=directional.has("upward")&&directional.has("downward")?"mixed":directional.size===1&&group.items.length>1?"aligned":"insufficient";
     const label=entities[0]?`${group.topic}: ${entities[0]}`:newest.title;
     const corroboration=crossSource?"cross-source":"single-source";
-    return {id:`cluster-${index}-${hash(newest.title)}`,topic:group.topic,title:label,updatedAt:newest.publishedAt,sourceCount:uniqueSources.size,itemCount:group.items.length,confidence:crossSource?Math.min(95,68+uniqueSources.size*8+Math.min(10,group.items.length*2)):55,corroboration,agreement,entities,summary:agreement==="mixed"?"The retrieved evidence contains opposing directional signals. AULOS preserves the disagreement rather than collapsing it into a single conclusion.":crossSource?`${uniqueSources.size} distinct source streams surface related evidence around ${entities.slice(0,2).join(" and ")||group.topic}. The underlying releases remain authoritative.`:"This is a developing single-source signal. AULOS is withholding cross-source confirmation until a separate publisher contributes related evidence.",narrative:buildNarrative(group.topic,entities,evidence,uniqueSources.size,agreement,corroboration),perspectives:evidence.map((item)=>({source:item.sourceName,sourceClass:item.sourceClass,title:item.title,summary:item.summary,url:item.url,publishedAt:item.publishedAt,tier:item.tier,stance:item.stance,entities:item.entities})),timeline:evidence.map((item)=>({publishedAt:item.publishedAt,source:item.sourceName,title:item.title,url:item.url,stance:item.stance})).sort((a,b)=>a.publishedAt.localeCompare(b.publishedAt))};
+    return {id:`cluster-${index}-${hash(newest.title)}`,topic:group.topic,title:label,updatedAt:newest.publishedAt,sourceCount:uniquePublishers.size,itemCount:group.items.length,confidence:crossSource?Math.min(95,68+uniquePublishers.size*8+Math.min(10,group.items.length*2)):55,corroboration,agreement,entities,summary:agreement==="mixed"?"The retrieved evidence contains opposing directional signals. AULOS preserves the disagreement rather than collapsing it into a single conclusion.":crossSource?`${uniquePublishers.size} independently governed publishers surface related evidence around ${entities.slice(0,2).join(" and ")||group.topic}. The underlying releases remain authoritative.`:"This is a developing single-publisher signal. AULOS is withholding cross-source confirmation until an independently governed publisher contributes related evidence.",narrative:buildNarrative(group.topic,entities,evidence,uniquePublishers.size,agreement,corroboration),perspectives:evidence.map((item)=>({source:item.sourceName,sourceClass:item.sourceClass,title:item.title,summary:item.summary,url:item.url,publishedAt:item.publishedAt,tier:item.tier,stance:item.stance,entities:item.entities})),timeline:evidence.map((item)=>({publishedAt:item.publishedAt,source:item.sourceName,title:item.title,url:item.url,stance:item.stance})).sort((a,b)=>a.publishedAt.localeCompare(b.publishedAt))};
   }).sort((a,b)=>(b.sourceCount-a.sourceCount)||(b.updatedAt.localeCompare(a.updatedAt))).slice(0,8);
 }
 
@@ -124,7 +151,7 @@ async function readPersistentBackend(){
     const items:WireItem[]=(payload.articles??[]).flatMap((article)=>{
       const feed=feedMap.get(article.sourceSlug);if(!feed)return [];
       const text=`${article.title} ${article.summary}`;
-      return [{id:`stored-${article.id}`,sourceSlug:article.sourceSlug,sourceName:article.sourceName,sourceClass:feed.sourceClass,title:article.title,url:article.url,publishedAt:article.publishedAt??article.retrievedAt,summary:article.summary.slice(0,420),topic:topicFor(text),tier:feed.tier,entities:entitiesFor(text),stance:stanceFor(text)}];
+      return [{id:`stored-${article.id}`,sourceSlug:article.sourceSlug,publisherId:publisherFor(article.sourceSlug),sourceName:article.sourceName,sourceClass:feed.sourceClass,title:article.title,url:article.url,publishedAt:article.publishedAt??article.retrievedAt,summary:article.summary.slice(0,420),topic:topicFor(text),tier:feed.tier,entities:entitiesFor(text),stance:stanceFor(text)}];
     });
     return {items,health:health?.lastCycle?.feeds??[]};
   }catch{return null}finally{clearTimeout(timer)}
@@ -135,10 +162,10 @@ export async function GET(){
   if(persistent&&persistent.items.length){
     const clusters=cluster(persistent.items);
     const healthMap=new Map(persistent.health.map((item)=>[item.slug,item]));
-    return Response.json({status:"live",generatedAt:new Date().toISOString(),persistence:"hetzner-postgresql",methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two distinct source streams",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-source signals are explicitly labeled and never presented as confirmed"},feedHealth:feeds.map((feed)=>{const health=healthMap.get(feed.slug);return {slug:feed.slug,name:feed.name,domain:feed.domain,sourceClass:feed.sourceClass,url:feed.url,status:health?.status??"stored",latencyMs:health?.latencyMs??0,itemCount:health?.received??persistent.items.filter((item)=>item.sourceSlug===feed.slug).length,error:health?.error??undefined}}),itemCount:persistent.items.length,entityCount:new Set(persistent.items.flatMap((item)=>item.entities)).size,clusters});
+    return Response.json({status:"live",generatedAt:new Date().toISOString(),persistence:"hetzner-postgresql",methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-publisher signals are explicitly labeled and never presented as confirmed"},feedHealth:feeds.map((feed)=>{const health=healthMap.get(feed.slug);return {slug:feed.slug,name:feed.name,domain:feed.domain,sourceClass:feed.sourceClass,url:feed.url,status:health?.status??"stored",latencyMs:health?.latencyMs??0,itemCount:health?.received??persistent.items.filter((item)=>item.sourceSlug===feed.slug).length,error:health?.error??undefined}}),itemCount:persistent.items.length,entityCount:new Set(persistent.items.flatMap((item)=>item.entities)).size,clusters});
   }
   const results=await Promise.all(feeds.map(readFeed));
   const deduped=[...new Map(results.flatMap((result)=>result.items).map((item)=>[item.url,item])).values()];
   const clusters=cluster(deduped);
-  return Response.json({status:results.some((result)=>result.status==="live")?"live":"degraded",generatedAt:new Date().toISOString(),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two distinct source streams",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-source signals are explicitly labeled and never presented as confirmed"},feedHealth:results.map((result)=>({slug:result.feed.slug,name:result.feed.name,domain:result.feed.domain,sourceClass:result.feed.sourceClass,url:result.feed.url,status:result.status,latencyMs:result.latencyMs,itemCount:result.items.length,error:"error" in result?result.error:undefined})),itemCount:deduped.length,entityCount:new Set(deduped.flatMap((item)=>item.entities)).size,clusters});
+  return Response.json({status:results.some((result)=>result.status==="live")?"live":"degraded",generatedAt:new Date().toISOString(),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-publisher signals are explicitly labeled and never presented as confirmed"},feedHealth:results.map((result)=>({slug:result.feed.slug,name:result.feed.name,domain:result.feed.domain,sourceClass:result.feed.sourceClass,url:result.feed.url,status:result.status,latencyMs:result.latencyMs,itemCount:result.items.length,error:"error" in result?result.error:undefined})),itemCount:deduped.length,entityCount:new Set(deduped.flatMap((item)=>item.entities)).size,clusters});
 }
