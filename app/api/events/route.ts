@@ -37,9 +37,17 @@ export async function GET(){
   const end=now.toISOString().slice(0,10);
   const ids=Object.keys(fredSeries);
   try{
-    const response=await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${ids.join(",")}&cosd=${start}&coed=${end}`,{headers:{"User-Agent":"AULOS-NEWS/0.3 (public-source intelligence prototype)"}});
-    if(!response.ok)throw new Error(`FRED returned ${response.status}`);
-    const observations=parseLatest(await response.text());
+    const baseUrl=process.env.AULOS_BACKEND_URL?.replace(/\/$/,"");
+    const backendResponse=baseUrl?await fetch(`${baseUrl}/v1/data/macro`,{headers:{"User-Agent":"AULOS-NEWS-Frontend/1.3"}}).catch(()=>null):null;
+    let observations:Observation[]=[];
+    if(backendResponse?.ok){
+      const payload=await backendResponse.json() as {data?:Array<{seriesId:string;label:string;date:string;value:number}>};
+      observations=(payload.data??[]).flatMap((item)=>{const meta=fredSeries[item.seriesId];if(!meta)return [];const number=item.value.toFixed(meta.decimals);return [{seriesId:item.seriesId,label:meta.label,date:item.date,value:item.value,display:meta.unit==="$"?`$${number}`:`${number}${meta.unit}`}];});
+    }else{
+      const response=await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${ids.join(",")}&cosd=${start}&coed=${end}`,{headers:{"User-Agent":"AULOS-NEWS/0.3 (public-source intelligence prototype)"}});
+      if(!response.ok)throw new Error(`FRED returned ${response.status}`);
+      observations=parseLatest(await response.text());
+    }
     const byId=Object.fromEntries(observations.map((item)=>[item.seriesId,item]));
     const claims=[];
     if(byId.DGS2)claims.push({id:"policy-rate",status:"OBSERVED",classification:"fact",confidence:100,statement:`The 2-year Treasury yield is ${byId.DGS2.display}.`,qualification:"This is a market price, not a direct forecast of a specific FOMC decision.",citations:[citation("DGS2",byId.DGS2.label,byId.DGS2.date)]});
