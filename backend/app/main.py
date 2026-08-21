@@ -8,7 +8,7 @@ import re
 import secrets
 from html import unescape
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, desc, select, text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, desc, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
@@ -133,7 +133,8 @@ def parsed_datetime(entry: Any) -> datetime | None:
     parsed = entry.get("published_parsed") or entry.get("updated_parsed")
     if not parsed:
         return None
-    return datetime(*parsed[:6], tzinfo=timezone.utc)
+    value = datetime(*parsed[:6], tzinfo=timezone.utc)
+    return value if value <= datetime.now(timezone.utc) + timedelta(hours=6) else None
 
 
 def seed_sources() -> None:
@@ -365,7 +366,8 @@ def sources() -> dict[str, Any]:
 @app.get("/v1/articles")
 def articles(limit: int = Query(default=100, ge=1, le=500), source: str | None = None) -> dict[str, Any]:
     with SessionLocal() as session:
-        query = select(Article).join(Article.source).order_by(desc(Article.published_at), desc(Article.retrieved_at)).limit(limit)
+        future_cutoff = datetime.now(timezone.utc) + timedelta(hours=6)
+        query = select(Article).join(Article.source).where(or_(Article.published_at.is_(None), Article.published_at <= future_cutoff)).order_by(desc(Article.published_at).nullslast(), desc(Article.retrieved_at)).limit(limit)
         if source:
             query = query.where(Source.slug == source)
         rows = session.scalars(query).all()
