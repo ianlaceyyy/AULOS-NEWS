@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
-type FeedDefinition={slug:string;name:string;url:string;tier:number;domain:string;sourceClass:"official"|"primary-research"};
+type SourceClass="official"|"primary-research"|"independent-reporting";
+type FeedDefinition={slug:string;name:string;url:string;tier:number;domain:string;sourceClass:SourceClass};
 type Stance="upward"|"downward"|"restrictive"|"supportive"|"finding"|"neutral";
 type WireItem={id:string;sourceSlug:string;publisherId:string;sourceName:string;sourceClass:FeedDefinition["sourceClass"];title:string;url:string;publishedAt:string;summary:string;topic:string;tier:number;entities:string[];stance:Stance};
 
@@ -140,9 +141,10 @@ async function readPersistentBackend(){
   if(!baseUrl)return null;
   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),8000);
   try{
-    const [articlesResponse,healthResponse]=await Promise.all([
+    const [articlesResponse,healthResponse,newsResponse]=await Promise.all([
       fetch(`${baseUrl}/v1/articles?limit=250`,{signal:controller.signal,headers:{"User-Agent":"AULOS-NEWS-Frontend/1.0"}}),
       fetch(`${baseUrl}/health`,{signal:controller.signal,headers:{"User-Agent":"AULOS-NEWS-Frontend/1.0"}}),
+      fetch(`${baseUrl}/v1/news?limit=50`,{signal:controller.signal,headers:{"User-Agent":"AULOS-NEWS-Frontend/1.1"}}).catch(()=>null),
     ]);
     if(!articlesResponse.ok)throw new Error(`Backend returned ${articlesResponse.status}`);
     const payload=await articlesResponse.json() as {articles?:Array<{id:number;sourceSlug:string;sourceName:string;title:string;summary:string;url:string;publishedAt:string|null;retrievedAt:string}>};
@@ -153,6 +155,13 @@ async function readPersistentBackend(){
       const text=`${article.title} ${article.summary}`;
       return [{id:`stored-${article.id}`,sourceSlug:article.sourceSlug,publisherId:publisherFor(article.sourceSlug),sourceName:article.sourceName,sourceClass:feed.sourceClass,title:article.title,url:article.url,publishedAt:article.publishedAt??article.retrievedAt,summary:article.summary.slice(0,420),topic:topicFor(text),tier:feed.tier,entities:entitiesFor(text),stance:stanceFor(text)}];
     });
+    if(newsResponse?.ok){
+      const newsPayload=await newsResponse.json() as {news?:Array<{id:number;headline:string;summary?:string;url:string;created_at:string;source?:string;symbols?:string[]}>};
+      for(const story of newsPayload.news??[]){
+        const text=`${story.headline} ${story.summary??""}`;const publisher=story.source??"Alpaca News";
+        items.push({id:`alpaca-news-${story.id}`,sourceSlug:"alpaca-news",publisherId:publisher,sourceName:`${publisher.replace(/^./,(letter)=>letter.toUpperCase())} via Alpaca`,sourceClass:"independent-reporting",title:story.headline,url:story.url,publishedAt:story.created_at,summary:(story.summary??"").slice(0,420),topic:topicFor(text),tier:2,entities:[...new Set([...entitiesFor(text),...(story.symbols??[])])].slice(0,5),stance:stanceFor(text)});
+      }
+    }
     return {items,health:health?.lastCycle?.feeds??[]};
   }catch{return null}finally{clearTimeout(timer)}
 }
@@ -162,7 +171,7 @@ export async function GET(){
   if(persistent&&persistent.items.length){
     const clusters=cluster(persistent.items);
     const healthMap=new Map(persistent.health.map((item)=>[item.slug,item]));
-    return Response.json({status:"live",generatedAt:new Date().toISOString(),persistence:"hetzner-postgresql",latestItems:persistent.items.slice(0,40),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-publisher signals are explicitly labeled and never presented as confirmed"},feedHealth:feeds.map((feed)=>{const health=healthMap.get(feed.slug);return {slug:feed.slug,name:feed.name,domain:feed.domain,sourceClass:feed.sourceClass,url:feed.url,status:health?.status??"stored",latencyMs:health?.latencyMs??0,itemCount:health?.received??persistent.items.filter((item)=>item.sourceSlug===feed.slug).length,error:health?.error??undefined}}),itemCount:persistent.items.length,entityCount:new Set(persistent.items.flatMap((item)=>item.entities)).size,clusters});
+    return Response.json({status:"live",generatedAt:new Date().toISOString(),persistence:"hetzner-postgresql",latestItems:[...persistent.items].sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).slice(0,40),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-publisher signals are explicitly labeled and never presented as confirmed"},feedHealth:feeds.map((feed)=>{const health=healthMap.get(feed.slug);return {slug:feed.slug,name:feed.name,domain:feed.domain,sourceClass:feed.sourceClass,url:feed.url,status:health?.status??"stored",latencyMs:health?.latencyMs??0,itemCount:health?.received??persistent.items.filter((item)=>item.sourceSlug===feed.slug).length,error:health?.error??undefined}}),itemCount:persistent.items.length,entityCount:new Set(persistent.items.flatMap((item)=>item.entities)).size,clusters});
   }
   const results=await Promise.all(feeds.map(readFeed));
   const deduped=[...new Map(results.flatMap((result)=>result.items).map((item)=>[item.url,item])).values()];
