@@ -50,7 +50,7 @@ export default function Home() {
     return true;
   }),[intelligence,topicFilter,qualityFilter,sourceFilter]);
   useEffect(()=>{if(filteredClusters.length&&!filteredClusters.some((cluster)=>cluster.id===selectedCluster))setSelectedCluster(filteredClusters[0].id)},[filteredClusters,selectedCluster]);
-  const marketPulse = liveData?.data.filter((item) => item.seriesId.startsWith("ALPACA:")||["DGS2","DGS10","T10Y2Y"].includes(item.seriesId)).slice(0,8).map((item) => [item.label,item.display,item.seriesId.startsWith("ALPACA:")?new Date(item.date).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}):item.date]) ?? [];
+  const marketPulse = liveData?.data.filter((item) => item.seriesId.startsWith("ALPACA:")||item.seriesId.startsWith("EIA:")||["DGS2","DGS10","T10Y2Y"].includes(item.seriesId)).slice(0,10).map((item) => [item.label,item.display,item.seriesId.startsWith("ALPACA:")?new Date(item.date).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}):item.date]) ?? [];
   const observation = (seriesId:string) => liveData?.data.find((item)=>item.seriesId===seriesId);
   const todayLabel = new Intl.DateTimeFormat("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric", timeZone:"America/Chicago" }).format(new Date()).toUpperCase();
   const visibleEvents = useMemo(() => {
