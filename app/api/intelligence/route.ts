@@ -52,6 +52,8 @@ const topicRules:[string,RegExp][]=[
   ["Commodities & derivatives",/commodity|commodities|derivative|futures|swap|cftc|gold|silver|copper/i],
   ["Climate & disaster risk",/hurricane|tropical storm|climate|flood|drought|wildfire|extreme weather/i],
   ["Geopolitics & security",/war|conflict|military|security|geopolit|ukraine|russia|china|taiwan|iran|israel|gaza/i],
+  ["Religion & society",/religion|religious|theolog|buddhis|christian|islam|hindu|ritual|sacred|secular/i],
+  ["UAP disclosure & evidence",/unidentified anomalous|\buap\b|\bufo\b|technosignature|astrobiology|extraterrestrial/i],
 ];
 
 const entityRules:[string,RegExp][]=[
@@ -62,6 +64,7 @@ const entityRules:[string,RegExp][]=[
   ["Robotics",/robot|robotics|autonomous system/i],["Biotechnology",/biotech|genom|protein|cell therapy|clinical trial/i],["Space",/space|lunar|moon|mars|orbit/i],
   ["U.S. Treasury",/u\.s\. treasury|department of the treasury|treasury secretary/i],["European Central Bank",/european central bank|\becb\b/i],["Bank of England",/bank of england|\bmpc\b/i],
   ["BIS",/bank for international settlements|\bbis\b/i],["CFTC",/commodity futures trading commission|\bcftc\b/i],["China",/china|chinese|beijing/i],["Russia",/russia|russian|moscow/i],["Ukraine",/ukraine|ukrainian|kyiv/i],
+  ["UAP",/unidentified anomalous|\buap\b|\bufo\b/i],["Religion",/religion|religious|theolog|buddhis|christian|islam|hindu/i],
 ];
 
 function decode(value:string){return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1").replace(/<[^>]+>/g," ").replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/\s+/g," ").trim()}
@@ -166,15 +169,39 @@ async function readPersistentBackend(){
   }catch{return null}finally{clearTimeout(timer)}
 }
 
+function gdeltDate(value:string){const match=value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);return match?`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`:value}
+function openAlexAbstract(index?:Record<string,number[]>){if(!index)return "";return Object.entries(index).flatMap(([word,positions])=>positions.map((position)=>[position,word] as const)).sort((a,b)=>a[0]-b[0]).map(([,word])=>word).join(" ").slice(0,420)}
+
+async function readFreeApis():Promise<WireItem[]>{
+  const gdeltQueries=["(energy OR oil OR gas OR gold OR silver OR commodities)","(geopolitics OR conflict OR sanctions OR election OR central bank OR artificial intelligence OR robotics)"];
+  const openAlexQueries=["religion theology religious studies",'"unidentified anomalous phenomena" OR astrobiology OR technosignatures'];
+  const openAlexKey=process.env.OPENALEX_API_KEY;
+  const requests=[
+    ...gdeltQueries.map((query)=>fetch(`https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=25&format=json&sort=datedesc`,{headers:{"User-Agent":"AULOS-NEWS/1.2"}}).then((response)=>response.ok?response.json():null).catch(()=>null)),
+    ...openAlexQueries.map((search)=>{const url=new URL("https://api.openalex.org/works");url.searchParams.set("search",search);url.searchParams.set("sort","publication_date:desc");url.searchParams.set("per-page","20");url.searchParams.set("select","id,doi,display_name,publication_date,primary_location,abstract_inverted_index,topics");if(openAlexKey)url.searchParams.set("api_key",openAlexKey);return fetch(url,{headers:{"User-Agent":"AULOS-NEWS/1.2 (mailto:research@aulos.news)"}}).then((response)=>response.ok?response.json():null).catch(()=>null)}),
+  ];
+  const payloads=await Promise.all(requests);const items:WireItem[]=[];
+  for(const payload of payloads.slice(0,gdeltQueries.length) as Array<{articles?:Array<{url:string;title:string;seendate:string;domain:string;language?:string}>}|null>){
+    for(const article of payload?.articles??[]){if(!article.url||!article.title)continue;const text=article.title;items.push({id:`gdelt-${hash(article.url)}`,sourceSlug:"gdelt-doc",publisherId:article.domain,sourceName:`${article.domain} via GDELT`,sourceClass:"independent-reporting",title:article.title,url:article.url,publishedAt:gdeltDate(article.seendate),summary:"Global reporting indexed by the GDELT Project. Open the source for the publisher's full report.",topic:topicFor(text),tier:3,entities:entitiesFor(text),stance:stanceFor(text)})}
+  }
+  for(const payload of payloads.slice(gdeltQueries.length) as Array<{results?:Array<{id:string;doi?:string;display_name:string;publication_date:string;primary_location?:{landing_page_url?:string;source?:{display_name?:string}};abstract_inverted_index?:Record<string,number[]>;topics?:Array<{display_name:string}>}>}|null>){
+    for(const work of payload?.results??[]){const url=work.doi??work.primary_location?.landing_page_url??work.id;if(!work.display_name||!url)continue;const abstract=openAlexAbstract(work.abstract_inverted_index);const text=`${work.display_name} ${abstract} ${(work.topics??[]).map((topic)=>topic.display_name).join(" ")}`;items.push({id:`openalex-${hash(work.id)}`,sourceSlug:"openalex",publisherId:work.primary_location?.source?.display_name??"openalex",sourceName:`${work.primary_location?.source?.display_name??"Scholarly work"} via OpenAlex`,sourceClass:"primary-research",title:work.display_name,url,publishedAt:`${work.publication_date}T00:00:00Z`,summary:abstract,topic:/religio|theolog/i.test(text)?"Religion & society":topicFor(text),tier:2,entities:entitiesFor(text),stance:"finding"})}
+  }
+  items.push({id:"nara-uap-rg615",sourceSlug:"nara-uap",publisherId:"national-archives",sourceName:"U.S. National Archives",sourceClass:"official",title:"Record Group 615: Unidentified Anomalous Phenomena Records Collection",url:"https://www.archives.gov/research/topics/uaps/rg-615",publishedAt:"2026-05-01T00:00:00Z",summary:"The official rolling collection of publicly released UAP records transferred by federal agencies under the 2024 NDAA.",topic:"UAP disclosure & evidence",tier:1,entities:["National Archives","UAP"],stance:"neutral"});
+  items.push({id:"aaro-official",sourceSlug:"aaro",publisherId:"department-of-defense",sourceName:"All-domain Anomaly Resolution Office",sourceClass:"official",title:"Official UAP records, reports and case-resolution material",url:"https://www.aaro.mil/",publishedAt:"2026-08-01T00:00:00Z",summary:"Department of Defense material is treated as an official documentary source, not proof of extraordinary origin.",topic:"UAP disclosure & evidence",tier:1,entities:["AARO","UAP"],stance:"neutral"});
+  return items;
+}
+
 export async function GET(){
   const persistent=await readPersistentBackend();
   if(persistent&&persistent.items.length){
-    const clusters=cluster(persistent.items);
+    const freeApiItems=await readFreeApis();const combined=[...new Map([...persistent.items,...freeApiItems].map((item)=>[item.url,item])).values()];
+    const clusters=cluster(combined);
     const healthMap=new Map(persistent.health.map((item)=>[item.slug,item]));
-    return Response.json({status:"live",generatedAt:new Date().toISOString(),persistence:"hetzner-postgresql",latestItems:[...persistent.items].sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).slice(0,40),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-publisher signals are explicitly labeled and never presented as confirmed"},feedHealth:feeds.map((feed)=>{const health=healthMap.get(feed.slug);return {slug:feed.slug,name:feed.name,domain:feed.domain,sourceClass:feed.sourceClass,url:feed.url,status:health?.status??"stored",latencyMs:health?.latencyMs??0,itemCount:health?.received??persistent.items.filter((item)=>item.sourceSlug===feed.slug).length,error:health?.error??undefined}}),itemCount:persistent.items.length,entityCount:new Set(persistent.items.flatMap((item)=>item.entities)).size,clusters});
+    return Response.json({status:"live",generatedAt:new Date().toISOString(),persistence:"hetzner-postgresql + free public APIs",latestItems:[...combined].sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).slice(0,40),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"UAP documents, reporting and scientific research remain separate evidence classes; no extraordinary claim is inferred from government disclosure alone."},feedHealth:feeds.map((feed)=>{const health=healthMap.get(feed.slug);return {slug:feed.slug,name:feed.name,domain:feed.domain,sourceClass:feed.sourceClass,url:feed.url,status:health?.status??"stored",latencyMs:health?.latencyMs??0,itemCount:health?.received??persistent.items.filter((item)=>item.sourceSlug===feed.slug).length,error:health?.error??undefined}}),itemCount:combined.length,entityCount:new Set(combined.flatMap((item)=>item.entities)).size,clusters});
   }
-  const results=await Promise.all(feeds.map(readFeed));
-  const deduped=[...new Map(results.flatMap((result)=>result.items).map((item)=>[item.url,item])).values()];
+  const [results,freeApiItems]=await Promise.all([Promise.all(feeds.map(readFeed)),readFreeApis()]);
+  const deduped=[...new Map([...results.flatMap((result)=>result.items),...freeApiItems].map((item)=>[item.url,item])).values()];
   const clusters=cluster(deduped);
   return Response.json({status:results.some((result)=>result.status==="live")?"live":"degraded",generatedAt:new Date().toISOString(),latestItems:deduped.sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).slice(0,40),methodology:{clustering:"Topic, entity overlap, and title-token similarity",corroboration:"Requires at least two independently governed publishers",stance:"Directional language is classified deterministically; mixed upward/downward evidence is preserved as disagreement",guardrail:"Single-publisher signals are explicitly labeled and never presented as confirmed"},feedHealth:results.map((result)=>({slug:result.feed.slug,name:result.feed.name,domain:result.feed.domain,sourceClass:result.feed.sourceClass,url:result.feed.url,status:result.status,latencyMs:result.latencyMs,itemCount:result.items.length,error:"error" in result?result.error:undefined})),itemCount:deduped.length,entityCount:new Set(deduped.flatMap((item)=>item.entities)).size,clusters});
 }
