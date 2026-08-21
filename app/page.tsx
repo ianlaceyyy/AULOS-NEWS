@@ -15,26 +15,15 @@ type IntelligencePerspective = { source:string; sourceClass:"official"|"primary-
 type NarrativeSentence = { id:string; label:string; classification:string; text:string; citationIndexes:number[] };
 type IntelligenceCluster = { id:string; topic:string; title:string; updatedAt:string; sourceCount:number; itemCount:number; confidence:number; corroboration:"cross-source"|"single-source"; agreement:"mixed"|"aligned"|"insufficient"; entities:string[]; summary:string; narrative:{headline:string;dek:string;mode:string;sentences:NarrativeSentence[];whatChanged:Array<{id:string;sequence:string;publishedAt:string;source:string;title:string;url:string;stance:Stance}>}; perspectives:IntelligencePerspective[]; timeline:Array<{publishedAt:string;source:string;title:string;url:string;stance:Stance}> };
 type FeedHealth = { slug:string; name:string; domain:string; sourceClass:"official"|"primary-research"; url:string; status:"live"|"degraded"; latencyMs:number; itemCount:number; error?:string };
-type IntelligencePayload = { status:"live"|"degraded"; persistence?:string; generatedAt:string; itemCount:number; entityCount:number; clusters:IntelligenceCluster[]; feedHealth:FeedHealth[]; methodology:{clustering:string;corroboration:string;stance:string;guardrail:string} };
+type NewsItem = { id:string; sourceName:string; sourceClass:"official"|"primary-research"; title:string; summary:string; url:string; publishedAt:string; topic:string; tier:number };
+type IntelligencePayload = { status:"live"|"degraded"; persistence?:string; generatedAt:string; itemCount:number; entityCount:number; latestItems:NewsItem[]; clusters:IntelligenceCluster[]; feedHealth:FeedHealth[]; methodology:{clustering:string;corroboration:string;stance:string;guardrail:string} };
 
-const events: Event[] = [
-  { id: "fed", category: "MACRO · MONETARY POLICY", kicker: "THE POLICY PATH", title: "Markets are repricing the next phase of Federal Reserve policy", summary: "A softer labor pulse is colliding with persistent services inflation. The debate has shifted from whether policy is restrictive to how quickly the Fed can normalize without reigniting prices.", change: "Rate-cut expectations moved forward; the long end remained resistant.", confidence: 88, sources: 18, updated: "22 min ago", tone: "amber", tags: ["Federal Reserve", "Treasuries", "Inflation"] },
-  { id: "energy", category: "ENERGY · GEOPOLITICS", kicker: "SUPPLY RISK", title: "Oil markets balance visible supply against a widening geopolitical premium", summary: "Physical balances remain adequately supplied, but shipping risk and uncertain spare capacity are steepening the cost of protection. Futures and tanker data tell different stories.", change: "Brent volatility rose while prompt spreads held near neutral.", confidence: 81, sources: 23, updated: "47 min ago", tone: "red", tags: ["Oil", "OPEC+", "Shipping"] },
-  { id: "ai-power", category: "AI · INFRASTRUCTURE", kicker: "THE POWER BOTTLENECK", title: "AI investment is becoming an electricity, grid and financing story", summary: "The next constraint on model deployment may sit outside the data center. Utilities, gas generation, grid equipment and project finance are becoming part of the AI capital cycle.", change: "New utility guidance points to a faster data-center demand ramp.", confidence: 84, sources: 16, updated: "1 hr ago", tone: "blue", tags: ["AI", "Electricity", "Infrastructure"] },
-  { id: "credit", category: "CREDIT · CAPITAL MARKETS", kicker: "RISK TRANSMISSION", title: "Credit remains calm even as refinancing pressure becomes more uneven", summary: "Headline spreads signal confidence, but dispersion is growing beneath the index. Lower-quality borrowers and rate-sensitive property exposures face a different cycle from large issuers.", change: "Index spreads tightened; single-name dispersion widened.", confidence: 78, sources: 14, updated: "2 hrs ago", tone: "violet", tags: ["Credit", "Refinancing", "CRE"] },
-];
-
-const ticker = [["UST 10Y", "4.21%", "+4 bp"], ["2s10s", "+31 bp", "+3 bp"], ["BRENT", "$82.46", "+1.4%"], ["GOLD", "$2,548", "+0.7%"], ["IG OAS", "91 bp", "−1 bp"], ["VIX", "16.8", "+0.9"]];
-const claims = [
-  { status: "CONFIRMED", claim: "Recent labor data show a measurable cooling in hiring momentum.", evidence: "BLS release · Fed Beige Book · 3 independent reports", color: "green" },
-  { status: "SUPPORTED", claim: "The committee has become more sensitive to downside employment risks.", evidence: "FOMC minutes · 4 speeches · Reuters analysis", color: "blue" },
-  { status: "DISPUTED", claim: "A near-term cut would necessarily restart inflation.", evidence: "Conflicting model estimates and policymaker views", color: "amber" },
-];
+const emptySelection:Event={id:"none",category:"LIVE INTELLIGENCE",kicker:"AWAITING EVIDENCE",title:"Select a live dossier",summary:"AULOS will display only retrieved, cited evidence here.",change:"No claim is shown until a source is available.",confidence:0,sources:0,updated:"Connecting",tone:"blue",tags:[]};
 const nav = ["World Now", "Markets", "Geopolitics", "Technology", "Science"];
 
 export default function Home() {
   const [activeNav, setActiveNav] = useState("World Now");
-  const [selected, setSelected] = useState<Event>(events[0]);
+  const [selected, setSelected] = useState<Event>(emptySelection);
   const [query, setQuery] = useState("");
   const [briefOpen, setBriefOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -60,7 +49,7 @@ export default function Home() {
     return true;
   }),[intelligence,topicFilter,qualityFilter,sourceFilter]);
   useEffect(()=>{if(filteredClusters.length&&!filteredClusters.some((cluster)=>cluster.id===selectedCluster))setSelectedCluster(filteredClusters[0].id)},[filteredClusters,selectedCluster]);
-  const marketPulse = liveData?.data.length ? liveData.data.filter((item) => ["DGS2","DGS10","DGS30","T10Y2Y","DCOILBRENTEU"].includes(item.seriesId)).map((item) => [item.label,item.display,item.date]) : ticker;
+  const marketPulse = liveData?.data.filter((item) => ["DGS2","DGS10","DGS30","T10Y2Y","DCOILBRENTEU"].includes(item.seriesId)).map((item) => [item.label,item.display,item.date]) ?? [];
   const observation = (seriesId:string) => liveData?.data.find((item)=>item.seriesId===seriesId);
   const todayLabel = new Intl.DateTimeFormat("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric", timeZone:"America/Chicago" }).format(new Date()).toUpperCase();
   const visibleEvents = useMemo(() => {
@@ -93,8 +82,8 @@ export default function Home() {
 
       <section className="ticker" aria-label="Market snapshot">
         <span className="ticker-label">MARKET PULSE</span>
-        <div className="ticker-items">{marketPulse.map(([label, value, move]) => <div className="ticker-item" key={label}><b>{label}</b><span>{value}</span><em>{move}</em></div>)}</div>
-        <span className={`live ${liveData?.status === "live" ? "verified" : ""}`}><i /> {liveData?.status === "live" ? "VERIFIED LIVE" : "CONNECTING"}</span>
+        <div className="ticker-items">{marketPulse.length ? marketPulse.map(([label, value, date]) => <div className="ticker-item" key={label}><b>{label}</b><span>{value}</span><em>{date}</em></div>) : <div className="ticker-item"><b>NO FALLBACK VALUES</b><span>Awaiting source</span></div>}</div>
+        <span className={`live ${liveData?.status === "live" ? "verified" : ""}`}><i /> {liveData?.status === "live" ? "SOURCE CONNECTED" : "CONNECTING"}</span>
       </section>
 
       {briefOpen && <section className="morning-brief">
@@ -106,6 +95,11 @@ export default function Home() {
         <section className="page-intro">
           <div><span className="eyebrow">{todayLabel} · CHICAGO</span><h1>{activeNav === "World Now" ? "The world, with the signal restored." : activeNav}</h1></div>
           <p>A continuously updated map of the events shaping policy, markets and power—built from official evidence, primary research and explicitly competing signals.</p>
+        </section>
+
+        <section className="live-newswire" aria-label="Latest live stories">
+          <div className="section-heading"><span>LATEST LIVE STORIES</span><small>{intelligence?.generatedAt ? `REFRESHED ${new Date(intelligence.generatedAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}` : "CONNECTING"}</small></div>
+          <div className="newswire-list">{intelligence?.latestItems?.length ? intelligence.latestItems.slice(0,12).map((item)=><a href={item.url} target="_blank" rel="noreferrer" key={item.id}><time>{item.publishedAt ? new Date(item.publishedAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}) : "—"}</time><span>{item.sourceName}<small>T{item.tier} · {item.sourceClass.replace("-"," ")}</small></span><h3>{item.title}</h3><b>{item.topic} ↗</b></a>) : <div className="empty-state">Connecting to the chronological source wire. No placeholder stories are shown.</div>}</div>
         </section>
 
         <section className="content-grid">
@@ -124,7 +118,7 @@ export default function Home() {
 
           <aside className="side-rail">
             <div className="section-heading"><span>SIGNAL BOARD</span><small>UPDATED NOW</small></div>
-            <div className="data-health"><span className="eyebrow">DATA HEALTH</span><b>{liveData?.status === "live" ? "PRIMARY FEED ONLINE" : "ESTABLISHING FEED"}</b><p>{liveData?.status === "live" ? `${liveData.data.length} current observations · ${liveData.source}` : "Illustrative values remain visible until the primary feed responds."}</p><small>{liveData?.retrievedAt ? `Retrieved ${new Date(liveData.retrievedAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}` : "Checking now"}</small></div>
+            <div className="data-health"><span className="eyebrow">DATA HEALTH</span><b>{liveData?.status === "live" ? "PRIMARY FEED ONLINE" : "ESTABLISHING FEED"}</b><p>{liveData?.status === "live" ? `${liveData.data.length} sourced observations · ${liveData.source}` : "No market values are displayed until a source responds."}</p><small>{liveData?.retrievedAt ? `Retrieved ${new Date(liveData.retrievedAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}` : "Checking now"}</small></div>
             <div className="signal-card"><div className="signal-top"><span>POLICY-SENSITIVE RATE</span><b>{observation("DGS2") ? "LIVE" : "CONNECTING"}</b></div><div className="rate-row"><strong>{observation("DGS2")?.display ?? "—"}</strong><span>2-year Treasury yield<br />latest FRED observation</span></div><small>{observation("DGS2") ? `Observation date ${observation("DGS2")?.date}` : "Awaiting primary data"}</small></div>
             <div className="signal-card curve-card"><div className="signal-top"><span>YIELD CURVE</span><b>OBSERVED</b></div><div className="rate-row"><strong>{observation("T10Y2Y")?.display ?? "—"}</strong><span>10-year minus 2-year<br />Treasury spread</span></div><small>{observation("T10Y2Y") ? `Observation date ${observation("T10Y2Y")?.date}` : "Awaiting primary data"}</small></div>
             <div className="watch-card"><span className="eyebrow">EVIDENCE PIPELINE</span><div><b>LIVE</b><p>FRED market and macro observations</p></div><div><b>PERSISTENT</b><p>PostgreSQL source and article history</p></div><div><b>GLOBAL</b><p>Macro, markets, energy, policy and research registry</p></div></div>
@@ -145,7 +139,7 @@ export default function Home() {
         {selected.id === "fed-live" && <section className="dossier" id="dossier">
           <div className="dossier-head"><div><span className="eyebrow">LIVE EVENT DOSSIER · {selected.category}</span><h2>{selected.title}</h2></div><div className="confidence"><strong>{selected.confidence}</strong><span>/100<br />CONFIDENCE</span></div></div>
           <div className="dossier-grid">
-            <div className="claims"><div className="section-heading"><span>CLAIM LEDGER</span><small>{selectedClaims ? "LIVE · PRIMARY EVIDENCE" : "TRACEABLE EVIDENCE"}</small></div>{selectedClaims ? selectedClaims.map((item) => <div className="claim live-claim" key={item.id}><span className={`status ${item.classification === "fact" ? "green" : "blue"}`}>{item.status}</span><div><h3>{item.statement}</h3><p>{item.qualification}</p><div className="claim-citations">{item.citations.map((source)=><a href={source.url} target="_blank" rel="noreferrer" key={`${item.id}-${source.url}`}>{source.label} ↗</a>)}</div></div></div>) : claims.map((item) => <div className="claim" key={item.claim}><span className={`status ${item.color}`}>{item.status}</span><div><h3>{item.claim}</h3><p>{item.evidence}</p></div></div>)}</div>
+            <div className="claims"><div className="section-heading"><span>CLAIM LEDGER</span><small>{selectedClaims ? "LIVE · PRIMARY EVIDENCE" : "TRACEABLE EVIDENCE"}</small></div>{selectedClaims ? selectedClaims.map((item) => <div className="claim live-claim" key={item.id}><span className={`status ${item.classification === "fact" ? "green" : "blue"}`}>{item.status}</span><div><h3>{item.statement}</h3><p>{item.qualification}</p><div className="claim-citations">{item.citations.map((source)=><a href={source.url} target="_blank" rel="noreferrer" key={`${item.id}-${source.url}`}>{source.label} ↗</a>)}</div></div></div>) : <div className="empty-state">No uncited claims are displayed. Select a live primary-evidence dossier.</div>}</div>
             <div className="perspectives"><div className="section-heading"><span>COMPETING READS</span><small>NOT FALSE BALANCE</small></div>
               <div className="perspective"><b>01</b><div><h3>Controlled normalization</h3><p>Disinflation can continue while policy gradually moves toward neutral.</p><span>Fed officials · labor data · market consensus</span></div></div>
               <div className="perspective"><b>02</b><div><h3>Premature easing risk</h3><p>Sticky services prices make the final stage of disinflation structurally harder.</p><span>Regional Fed research · inflation hawks</span></div></div>
