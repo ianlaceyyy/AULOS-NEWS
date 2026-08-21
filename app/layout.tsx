@@ -8,6 +8,7 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://aulos-news.ian-g-lacey2.chatgpt.site"),
   openGraph: { title: "AULOS NEWS", description: "Evidence before narrative. A personal world-intelligence platform.", images: [{ url: "/og.png", width: 1731, height: 909, alt: "AULOS NEWS — Evidence before narrative." }] },
   twitter: { card: "summary_large_image", title: "AULOS NEWS", description: "Evidence before narrative.", images: ["/og.png"] },
+  other: { "codex-preview": "development" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
